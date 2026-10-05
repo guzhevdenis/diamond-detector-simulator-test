@@ -1,0 +1,117 @@
+# =========================
+
+# Build directories
+
+# =========================
+
+build/
+build-*/
+out/
+bin/
+debug/
+release/
+
+# =========================
+
+# Qt Creator
+
+# =========================
+
+*.pro.user
+*.pro.user.*
+*.qbs.user
+*.qbs.user.*
+
+# Qt Creator CMake files
+
+CMakeLists.txt.user
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+
+# =========================
+
+# qmake generated files
+
+# =========================
+
+Makefile*
+*.moc
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+*.qmlc
+*.jsc
+
+# =========================
+
+# Object / binary files
+
+# =========================
+
+*.o
+*.obj
+*.lo
+*.a
+*.la
+*.dll
+*.so
+*.so.*
+*.dylib
+*.exe
+*.app
+
+# =========================
+
+# Debug symbols
+
+# =========================
+
+*.dSYM/
+*.pdb
+
+# =========================
+
+# Qt resource cache
+
+# =========================
+
+*.qrc.depends
+
+# =========================
+
+# Logs
+
+# =========================
+
+*.log
+
+# =========================
+
+# OS files
+
+# =========================
+
+.DS_Store
+Thumbs.db
+
+# =========================
+
+# Temporary files
+
+# =========================
+
+*~
+*.swp
+*.tmp
+
+# =========================
+
+# Coverage / profiling
+
+# =========================
+
+*.gcda
+*.gcno
+*.gcov
