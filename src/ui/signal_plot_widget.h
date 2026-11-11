@@ -3,6 +3,7 @@
 
 #include <QWidget>
 #include <vector>
+#include <memory>
 
 class QCustomPlot;
 class QCPGraph;
@@ -24,6 +25,8 @@ public:
 
     // Load full signal (uniformly sampled) into the viewer.
     void setSignal(const std::vector<double> &samples, double sampleRateHz);
+    // Share immutable generated data with the exporter instead of duplicating it.
+    void setSharedSignal(std::shared_ptr<const std::vector<double>> samples, double sampleRateHz);
 
     // Load signal together with explicit time stamps (in seconds).
     // Used when non-trivial timing comes from data files.
@@ -76,7 +79,7 @@ private:
 
     SignalPlotMode m_mode = SignalPlotMode::TimeSignal;
 
-    std::vector<double> m_signal;
+    std::shared_ptr<const std::vector<double>> m_signal = std::make_shared<const std::vector<double>>();
     double              m_sampleRateHz = 0.0;
 
     // Optional explicit time axis (seconds). If empty, uniform sampling is used.

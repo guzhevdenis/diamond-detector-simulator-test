@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <utility>
 #include <QScrollArea>
 #include "amplitude_spectrum.h"
 #include "event_time_sampler.h"
@@ -346,7 +347,7 @@ void MainWindow::onResetSignalZoom()
 }
 void MainWindow::onExportCsv()
 {
-    if (m_lastSignal.empty() || m_lastSampleRateHz <= 0.0) {
+    if (m_lastSignal->empty() || m_lastSampleRateHz <= 0.0) {
         QMessageBox::warning(this, tr("Export error"),
                              tr("No signal available. Please generate a signal first."));
         return;
@@ -371,11 +372,11 @@ void MainWindow::onExportCsv()
     out << "time_s,amplitude\n";
 
     const double dt = 1.0 / m_lastSampleRateHz;
-    const std::size_t n = m_lastSignal.size();
+    const std::size_t n = m_lastSignal->size();
     for (std::size_t i = 0; i < n; ++i) {
         const double t = static_cast<double>(i) * dt;
         out << QString::number(t, 'g', 16) << ','
-            << QString::number(m_lastSignal[i], 'g', 16) << '\n';
+            << QString::number((*m_lastSignal)[i], 'g', 16) << '\n';
     }
 }
 
@@ -412,7 +413,7 @@ void MainWindow::generateWlfFile(QFile &file, QString wlfFileName, QString dataT
     xmlWriter.writeEndElement();
 
     xmlWriter.writeStartElement("Duration");
-    xmlWriter.writeCharacters(QString::number(static_cast<qulonglong>(m_lastSignal.size())));
+    xmlWriter.writeCharacters(QString::number(static_cast<qulonglong>(m_lastSignal->size())));
     xmlWriter.writeEndElement();
 
     xmlWriter.writeStartElement("Component");
@@ -476,7 +477,7 @@ void MainWindow::generateWlfFile(QFile &file, QString wlfFileName, QString dataT
 
 void MainWindow::onExportWlf()
 {
-    if (m_lastSignal.empty() || m_lastSampleRateHz <= 0.0) {
+    if (m_lastSignal->empty() || m_lastSampleRateHz <= 0.0) {
         QMessageBox::warning(this, tr("Export error"),
                              tr("No signal available. Please generate a signal first."));
         return;
@@ -512,9 +513,9 @@ void MainWindow::onExportWlf()
 
     QTextStream outData(&dataTxtFile);
 
-    const std::size_t n = m_lastSignal.size();
+    const std::size_t n = m_lastSignal->size();
     for (std::size_t i = 0; i < n; ++i) {
-        outData << QString::number(m_lastSignal[i], 'g', 16) << '\n';
+        outData << QString::number((*m_lastSignal)[i], 'g', 16) << '\n';
     }
 
     QFileInfo dataTxtFileInfo(dataTxtFile);
@@ -540,8 +541,7 @@ void MainWindow::onGenerate()
         const double rateHz = m_eventRateSpin->value();
         const double sampleRateHz = m_sampleRateSpin->value();
         const double noiseStdDev = m_noiseLevelSpin->value();
-        if (durationSec * sampleRateHz > 20000000)
-            throw std::invalid_argument("Signal exceeds the limit of 20 million samples.");
+        SignalSynthesisService::sampleCount(durationSec, sampleRateHz);
         const double pretriggerSec = m_pretriggerSpin->value() * 1e-9;
         const double eventWindow = durationSec - pretriggerSec - pulse.settlingTimeNs() * 1e-9;
         if (eventWindow <= 0)
@@ -577,7 +577,7 @@ void MainWindow::onGenerate()
         std::function<double(std::mt19937 &)> sampler;
         if (ampMode != 4)
             sampler = [this](std::mt19937 &rng) { return m_amplitudeSpectrum->sample(rng); };
-        const auto signal = m_synthService->synthesize(pulse, eventTimes, durationSec,
+        auto signal = m_synthService->synthesize(pulse, eventTimes, durationSec,
                                                     sampleRateHz, noiseStdDev, m_rng, sampler);
 
         if (signal.empty()) {
@@ -586,12 +586,12 @@ void MainWindow::onGenerate()
         }
 
         // Store last signal for CSV and WLF export
-        m_lastSignal = signal;
+        m_lastSignal = std::make_shared<const std::vector<double>>(std::move(signal));
         m_lastSampleRateHz = sampleRateHz;
         m_exportCsvAction->setEnabled(true);
         m_exportWlfAction->setEnabled(true);
 
-        updateSignalChart(signal, sampleRateHz);
+        updateSignalChart(m_lastSignal, sampleRateHz);
         updateAmplitudeSpectrumChart();
     } catch (const std::exception &e) {
         QMessageBox::warning(this, tr("Generation error"), QString::fromUtf8(e.what()));
@@ -676,11 +676,11 @@ void MainWindow::updateAmplitudeSpectrumChart()
 }
 
 
-void MainWindow::updateSignalChart(const std::vector<double> &signal,
+void MainWindow::updateSignalChart(std::shared_ptr<const std::vector<double>> signal,
                                    double sampleRateHz)
 {
     if (m_signalPlotWidget)
-        m_signalPlotWidget->setSignal(signal, sampleRateHz);
+        m_signalPlotWidget->setSharedSignal(std::move(signal), sampleRateHz);
 }
 
 PulseParameters MainWindow::pulseParameters() const

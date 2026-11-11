@@ -48,6 +48,15 @@ int main() {
                 near(scaled.value(t)/amplitude, p.value(t)/12000, 1e-14, "Shape changed with A");
         }
         SignalSynthesisService service;
+        // Check allocation boundaries without allocating a maximum-size signal.
+        require(service.sampleCount(1.0, 8e8) == 800000000, "One second at 800 MHz");
+        const double limit = SignalSynthesisService::maxSamples;
+        require(service.sampleCount(1, limit) == SignalSynthesisService::maxSamples, "Exact sample limit");
+        require(service.sampleCount(1, limit + 0.5) == SignalSynthesisService::maxSamples, "Fractional sample count");
+        rejects([&] { service.sampleCount(1, limit + 1); });
+        rejects([&] { service.sampleCount(0, 8e8); });
+        rejects([&] { service.sampleCount(1, std::numeric_limits<double>::quiet_NaN()); });
+        rejects([&] { service.sampleCount(1e300, 1e300); });
         std::mt19937 rng(123);
         const double t0 = 100.37e-9;
         for (double fs : {4e8, 8e8, 2e9}) {

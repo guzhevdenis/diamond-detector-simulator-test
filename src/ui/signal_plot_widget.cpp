@@ -4,6 +4,7 @@
 
 #include <QVBoxLayout>
 #include <QResizeEvent>
+#include <utility>
 
 SignalPlotWidget::SignalPlotWidget(QWidget *parent)
     : QWidget(parent)
@@ -31,8 +32,14 @@ SignalPlotWidget::~SignalPlotWidget() = default;
 void SignalPlotWidget::setSignal(const std::vector<double> &samples,
                                  double sampleRateHz)
 {
+    setSharedSignal(std::make_shared<const std::vector<double>>(samples), sampleRateHz);
+}
+
+void SignalPlotWidget::setSharedSignal(std::shared_ptr<const std::vector<double>> samples,
+                                      double sampleRateHz)
+{
     m_mode = SignalPlotMode::TimeSignal;
-    m_signal = samples;
+    m_signal = samples ? std::move(samples) : std::make_shared<const std::vector<double>>();
     m_sampleRateHz = sampleRateHz;
     m_timesSeconds.clear();
     m_hasSpectrum = false;
@@ -46,7 +53,7 @@ void SignalPlotWidget::setSignalWithTimes(const std::vector<double> &timesSecond
                                           const std::vector<double> &samples)
 {
     m_mode = SignalPlotMode::TimeSignal;
-    m_signal = samples;
+    m_signal = std::make_shared<const std::vector<double>>(samples);
     m_timesSeconds = timesSeconds;
     m_sampleRateHz = 0.0; // not used when explicit times are present
     m_hasSpectrum = false;
@@ -194,7 +201,7 @@ void SignalPlotWidget::setSpectrumLogX(bool enabled)
 
 void SignalPlotWidget::clear()
 {
-    m_signal.clear();
+    m_signal = std::make_shared<const std::vector<double>>();
     m_sampleRateHz = 0.0;
     m_fullMinTimeNs = 0.0;
     m_fullMaxTimeNs = 0.0;
@@ -233,7 +240,7 @@ void SignalPlotWidget::resetView()
         return;
     }
 
-    if (m_signal.empty())
+    if (m_signal->empty())
         return;
 
     m_updating = true;
@@ -241,7 +248,7 @@ void SignalPlotWidget::resetView()
     m_plot->xAxis->setRange(m_fullMinTimeNs, m_fullMaxTimeNs);
 
     // Y range from full signal
-    auto minmax = std::minmax_element(m_signal.begin(), m_signal.end());
+    auto minmax = std::minmax_element(m_signal->begin(), m_signal->end());
     const double minY = *minmax.first;
     const double maxY = *minmax.second;
     const double padding = 0.05 * (maxY - minY + 1e-12);
@@ -290,7 +297,7 @@ void SignalPlotWidget::rebuildVisibleData()
         return;
     }
 
-    if (m_signal.empty())
+    if (m_signal->empty())
         return;
 
     const int pixelWidth = m_plot->viewport().width();
@@ -323,13 +330,13 @@ void SignalPlotWidget::updateFullRange()
         return;
     }
 
-    if (m_signal.empty()) {
+    if (m_signal->empty()) {
         m_fullMinTimeNs = 0.0;
         m_fullMaxTimeNs = 0.0;
         return;
     }
 
-    const std::size_t n = m_signal.size();
+    const std::size_t n = m_signal->size();
 
     if (!m_timesSeconds.empty() && m_timesSeconds.size() == n) {
         // Use explicit time axis
@@ -350,7 +357,7 @@ void SignalPlotWidget::updateFullRange()
     m_updating = true;
     m_plot->xAxis->setRange(m_fullMinTimeNs, m_fullMaxTimeNs);
 
-    auto minmax = std::minmax_element(m_signal.begin(), m_signal.end());
+    auto minmax = std::minmax_element(m_signal->begin(), m_signal->end());
     const double minY = *minmax.first;
     const double maxY = *minmax.second;
     const double padding = 0.05 * (maxY - minY + 1e-12);
@@ -364,7 +371,7 @@ void SignalPlotWidget::buildMinMaxEnvelope(double tMinNs,
                                            QVector<double> &x,
                                            QVector<double> &y) const
 {
-    const std::size_t n = m_signal.size();
+    const std::size_t n = m_signal->size();
     if (n == 0)
         return;
 
@@ -429,13 +436,13 @@ void SignalPlotWidget::buildMinMaxEnvelope(double tMinNs,
         if (bEnd > iEnd)
             bEnd = iEnd;
 
-        double minVal = m_signal[bStart];
-        double maxVal = m_signal[bStart];
+        double minVal = (*m_signal)[bStart];
+        double maxVal = (*m_signal)[bStart];
         std::size_t idxMin = bStart;
         std::size_t idxMax = bStart;
 
         for (std::size_t i = bStart + 1; i < bEnd; ++i) {
-            const double v = m_signal[i];
+            const double v = (*m_signal)[i];
             if (v < minVal) {
                 minVal = v;
                 idxMin = i;

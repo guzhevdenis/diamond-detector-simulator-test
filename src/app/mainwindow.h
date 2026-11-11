@@ -4,6 +4,7 @@
 #include <QMainWindow>
 #include <random>
 #include <vector>
+#include <memory>
 #include <QtCharts>
 #include <QtCharts/QChartView>
 #include <QtCharts/QChart>
@@ -56,7 +57,7 @@ private slots:
 private:
     void buildUi();
     void updateAmplitudeSpectrumChart();
-    void updateSignalChart(const std::vector<double> &signal, double sampleRateHz);
+    void updateSignalChart(std::shared_ptr<const std::vector<double>> signal, double sampleRateHz);
     void updatePulseChart();
     PulseParameters pulseParameters() const;
 
@@ -106,7 +107,7 @@ private:
     QChartView *m_spectrumChartView  = nullptr;
 
     // Last generated signal (for CSV and WLF export)
-    std::vector<double> m_lastSignal;
+    std::shared_ptr<const std::vector<double>> m_lastSignal = std::make_shared<const std::vector<double>>();
     double m_lastSampleRateHz = 0.0;
 };
 #endif // MAINWINDOW_H
