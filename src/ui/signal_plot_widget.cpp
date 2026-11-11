@@ -22,6 +22,8 @@ SignalPlotWidget::SignalPlotWidget(QWidget *parent)
     m_plot->axisRect()->setRangeZoom(Qt::Horizontal);
 
     m_plot->legend->setVisible(false);
+    setToolTip(tr("Wheel: zoom time axis; drag: pan; double-click: reset."));
+    connect(m_plot, &QCustomPlot::mouseDoubleClick, this, [this] { resetView(); });
 
     connect(m_plot->xAxis, SIGNAL(rangeChanged(QCPRange,QCPRange)),
             this, SLOT(onXAxisRangeChanged(QCPRange,QCPRange)));
@@ -220,9 +222,14 @@ void SignalPlotWidget::setAxisLabels(const QString &xLabel, const QString &yLabe
 
 void SignalPlotWidget::setTitle(const QString &title)
 {
-    m_plot->plotLayout()->insertRow(0);
-    QCPTextElement *titleElement = new QCPTextElement(m_plot, title, QFont(font().family(), 10, QFont::Bold));
-    m_plot->plotLayout()->addElement(0, 0, titleElement);
+    if (!m_titleElement) {
+        m_plot->plotLayout()->insertRow(0);
+        m_titleElement = new QCPTextElement(m_plot, title, QFont(font().family(), 10, QFont::Bold));
+        m_plot->plotLayout()->addElement(0, 0, m_titleElement);
+    } else {
+        m_titleElement->setText(title);
+    }
+    m_plot->replot(QCustomPlot::rpQueuedReplot);
 }
 
 void SignalPlotWidget::resetView()

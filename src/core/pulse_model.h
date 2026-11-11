@@ -1,6 +1,6 @@
 #pragma once
 struct PulseParameters {
-    double amplitude = 12000.0;
+    double amplitude = 1.0; // Positive peak in volts.
     double riseTimeNs = 6.0;
     double fallTimeNs = 20.0;
     double beta = 0.08;

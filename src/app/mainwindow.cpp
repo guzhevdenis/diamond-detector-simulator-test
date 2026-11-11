@@ -139,11 +139,12 @@ void MainWindow::buildUi()
     };
 
     auto *pulseForm = addSection(tr("Pulse model"), true);
-    m_pulseAmplitudeSpin = addParameter(pulseForm, tr("Amplitude A:"), 0, 1e9, 12000, 3);
+    m_pulseAmplitudeSpin = addParameter(pulseForm, tr("Amplitude A [V]:"), 0, 1e9, PulseParameters{}.amplitude, 6);
+    m_pulseAmplitudeSpin->setSingleStep(0.01);
     m_riseTimeSpin = addParameter(pulseForm, tr("tau_r [ns]:"), 0.001, 1e6, 6, 3);
     m_fallTimeSpin = addParameter(pulseForm, tr("tau_f [ns]:"), 0.001, 1e6, 20, 3);
     m_betaSpin = addParameter(pulseForm, tr("beta:"), 0, 1000, 0.08, 6);
-    auto *modelNote = new QLabel(tr("Fixed: tau_u = 100 ns; baseline = 0. A is the positive peak height."), controlsWidget);
+    auto *modelNote = new QLabel(tr("Fixed: tau_u = 100 ns; baseline = 0 V. A is the positive peak height in volts."), controlsWidget);
     modelNote->setWordWrap(true);
     pulseForm->addRow(modelNote);
 
@@ -178,12 +179,14 @@ void MainWindow::buildUi()
     fileForm->addRow(m_spectrumPathEdit);
     fileForm->addRow(m_loadSpectrumButton);
     auto *normalForm = addAmplitudePanel();
-    m_normMeanSpin = addParameter(normalForm, tr("Mean:"), 0, 1e9, 12000, 6);
-    m_normSigmaSpin = addParameter(normalForm, tr("Sigma:"), 1e-6, 1e6, 1200, 6);
+    m_normMeanSpin = addParameter(normalForm, tr("Mean [V]:"), 0, 1e9, 1.0, 6);
+    m_normSigmaSpin = addParameter(normalForm, tr("Sigma [V]:"), 1e-6, 1e6, 0.1, 6);
+    m_normMeanSpin->setSingleStep(0.01);
+    m_normSigmaSpin->setSingleStep(0.01);
     auto *exponentialForm = addAmplitudePanel();
-    m_expLambdaSpin = addParameter(exponentialForm, tr("Lambda:"), 1e-6, 1e6, 1, 6);
+    m_expLambdaSpin = addParameter(exponentialForm, tr("Lambda [1/V]:"), 1e-6, 1e6, 1, 6);
     auto *logNormalForm = addAmplitudePanel();
-    m_logMuSpin = addParameter(logNormalForm, tr("Mu:"), -1e6, 1e6, 0, 6);
+    m_logMuSpin = addParameter(logNormalForm, tr("Mu (ln(A / 1 V)):"), -1e6, 1e6, 0, 6);
     m_logSigmaSpin = addParameter(logNormalForm, tr("Sigma:"), 1e-6, 1e6, 0.25, 6);
 
     auto *samplingForm = addSection(tr("Sampling and duration"), false);
@@ -192,7 +195,10 @@ void MainWindow::buildUi()
     m_pretriggerSpin = addParameter(samplingForm, tr("Pre-trigger [ns]:"), 0, 1e9, 100, 3);
 
     auto *noiseForm = addSection(tr("Noise and random seed"), false);
-    m_noiseLevelSpin = addParameter(noiseForm, tr("Noise stddev:"), 0, 1e3, 0, 6);
+    m_noiseLevelSpin = addParameter(noiseForm, tr("Noise stddev [V]:"), 0, 1e3, 0, 6);
+    m_noiseLevelSpin->setSingleStep(0.001);
+    m_logSigmaSpin->setToolTip(tr("Standard deviation of ln(A / 1 V), dimensionless."));
+    m_spectrumPathEdit->setToolTip(tr("Amplitude values in the spectrum file must be in volts."));
     m_seedSpin = new QSpinBox(controlsWidget);
     m_seedSpin->setRange(0, std::numeric_limits<int>::max());
     m_seedSpin->setValue(12345);
@@ -205,27 +211,27 @@ void MainWindow::buildUi()
     charts->setHandleWidth(6);
     m_signalPlotWidget = new SignalPlotWidget(charts);
     m_signalPlotWidget->setMinimumSize(240, 160);
-    m_signalPlotWidget->setAxisLabels(tr("Time [ns]"), tr("Amplitude"));
+    m_signalPlotWidget->setAxisLabels(tr("Time [ns]"), tr("Amplitude [V]"));
     m_signalPlotWidget->setTitle(tr("Generated Signal"));
 
     auto *detailCharts = new QSplitter(Qt::Horizontal, charts);
     detailCharts->setChildrenCollapsible(false);
     detailCharts->setHandleWidth(6);
-    m_pulseChartView = new QChartView(new QChart(), detailCharts);
+    m_pulsePlotWidget = new SignalPlotWidget(detailCharts);
+    m_pulsePlotWidget->setMinimumSize(160, 120);
+    m_pulsePlotWidget->setAxisLabels(tr("Time [ns]"), tr("Amplitude [V]"));
+    m_pulsePlotWidget->setTitle(tr("Pulse Model"));
     m_spectrumChartView = new QChartView(new QChart(), detailCharts);
-    m_pulseChartView->chart()->setTitle(tr("Pulse Model"));
     m_spectrumChartView->chart()->setTitle(tr("Amplitude Spectrum"));
-    for (auto *view : {m_pulseChartView, m_spectrumChartView}) {
-        view->setMinimumSize(160, 120);
-        view->setRubberBand(QChartView::RectangleRubberBand);
-        view->chart()->legend()->hide();
-        view->chart()->setMargins(QMargins(4, 4, 4, 4));
-    }
+    m_spectrumChartView->setMinimumSize(160, 120);
+    m_spectrumChartView->setRubberBand(QChartView::RectangleRubberBand);
+    m_spectrumChartView->chart()->legend()->hide();
+    m_spectrumChartView->chart()->setMargins(QMargins(4, 4, 4, 4));
     workspace->addWidget(controlsScroll);
     workspace->addWidget(charts);
     charts->addWidget(m_signalPlotWidget);
     charts->addWidget(detailCharts);
-    detailCharts->addWidget(m_pulseChartView);
+    detailCharts->addWidget(m_pulsePlotWidget);
     detailCharts->addWidget(m_spectrumChartView);
     workspace->setStretchFactor(0, 0);
     workspace->setStretchFactor(1, 1);
@@ -289,7 +295,7 @@ void MainWindow::buildUi()
     };
     connect(m_ampDistCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
             [updateAmplitudeControls](int) { updateAmplitudeControls(); });
-    m_pulseAmplitudeSpin->setToolTip(tr("Used for Constant A mode and the single-pulse preview. Distributions supply each event's A directly."));
+    m_pulseAmplitudeSpin->setToolTip(tr("Used for Constant A mode and the single-pulse preview. A is in volts; distributions supply each event's A directly in volts."));
     m_pretriggerSpin->setToolTip(tr("Leading baseline interval. The end of the array is reserved for tail decay."));
     m_generateButton->setToolTip(tr("Generates pulses from the analytic model; no pulse template file is needed."));
     m_exportCsvAction->setEnabled(false);
@@ -369,7 +375,7 @@ void MainWindow::onExportCsv()
     }
 
     QTextStream out(&file);
-    out << "time_s,amplitude\n";
+    out << "time_s,amplitude_V\n";
 
     const double dt = 1.0 / m_lastSampleRateHz;
     const std::size_t n = m_lastSignal->size();
@@ -605,7 +611,7 @@ void MainWindow::updateAmplitudeSpectrumChart()
     for (auto *axis : chart->axes()) { chart->removeAxis(axis); delete axis; }
 
     if (m_ampDistCombo->currentIndex() == 4) {
-        chart->setTitle(tr("Constant amplitude A = %1").arg(m_pulseAmplitudeSpin->value()));
+        chart->setTitle(tr("Constant amplitude A = %1 V").arg(m_pulseAmplitudeSpin->value()));
         return;
     }
     if (!m_amplitudeSpectrum->hasData()) {
@@ -663,7 +669,7 @@ void MainWindow::updateAmplitudeSpectrumChart()
     chart->addSeries(series);
 
     auto *axisX = new QValueAxis(chart);
-    axisX->setTitleText(tr("Amplitude"));
+    axisX->setTitleText(tr("Amplitude [V]"));
     chart->addAxis(axisX, Qt::AlignBottom);
     series->attachAxis(axisX);
 
@@ -691,33 +697,30 @@ PulseParameters MainWindow::pulseParameters() const
 
 void MainWindow::updatePulseChart()
 {
-    QChart *chart = m_pulseChartView->chart();
-    chart->removeAllSeries();
-    for (auto *axis : chart->axes()) { chart->removeAxis(axis); delete axis; }
     try {
         const PulseModel pulse(pulseParameters());
-        auto *series = new QLineSeries(chart);
         const double pre = m_pretriggerSpin->value();
-        // Preview uses the output time grid; cap displayed points for responsiveness.
         const double fs = m_sampleRateSpin->value();
         const double endNs = pre + pulse.settlingTimeNs();
         const double count = std::ceil(endNs * fs * 1e-9) + 1;
-        const double stride = std::max(1.0, std::ceil(count / 10000.0));
+        // Bound preview memory for extreme time constants/sample rates.
+        // Explicit times preserve the output-grid positions when subsampling.
+        const double stride = std::max(1.0, std::ceil(count / 200000.0));
+        std::vector<double> times, values;
+        const auto previewCount = static_cast<std::size_t>(std::ceil(count / stride));
+        times.reserve(previewCount);
+        values.reserve(previewCount);
         for (double k = 0; k < count; k += stride) {
-            const double t = k / fs * 1e9;
-            series->append(t, pulse.value(t - pre));
+            const double timeSec = k / fs;
+            times.push_back(timeSec);
+            values.push_back(pulse.value(timeSec * 1e9 - pre));
         }
-        chart->addSeries(series);
-        auto *axisX = new QValueAxis(chart);
-        axisX->setTitleText(tr("Time [ns]"));
-        chart->addAxis(axisX, Qt::AlignBottom);
-        series->attachAxis(axisX);
-        auto *axisY = new QValueAxis(chart);
-        axisY->setTitleText(tr("Amplitude"));
-        chart->addAxis(axisY, Qt::AlignLeft);
-        series->attachAxis(axisY);
-        chart->setTitle(tr("Pulse Model (A = %1, tau_u = 100 ns)").arg(pulse.parameters().amplitude));
+        m_pulsePlotWidget->setTitle(tr("Pulse Model (A = %1 V)").arg(pulse.parameters().amplitude));
+        m_pulsePlotWidget->setSignalWithTimes(times, values);
+        m_pulsePlotWidget->setToolTip(tr("Wheel: zoom time axis; drag: pan; double-click: reset. Preview step: %1 ns.")
+                                     .arg(stride / fs * 1e9));
     } catch (const std::exception &e) {
-        chart->setTitle(QString::fromUtf8(e.what()));
+        m_pulsePlotWidget->clear();
+        m_pulsePlotWidget->setTitle(QString::fromUtf8(e.what()));
     }
 }

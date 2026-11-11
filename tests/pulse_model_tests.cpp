@@ -30,9 +30,9 @@ int main() {
         const PulseModel p;
         near(p.value(-1), 0, 0, "Causality");
         near(p.value(0), 0, 0, "Onset");
-        near(p.value(p.peakTimeNs()), 12000, 1e-8, "Peak height");
+        near(p.value(p.peakTimeNs()), 1.0, 1e-12, "Peak height in volts");
         require(p.value(200) < 0, "Negative tail missing");
-        require(std::abs(p.value(p.settlingTimeNs())) < 12000e-12, "Tail bound");
+        require(std::abs(p.value(p.settlingTimeNs())) < 1e-12, "Tail bound");
         PulseParameters parameters;
         parameters.beta = 0;
         const PulseModel noTail(parameters);
@@ -40,12 +40,12 @@ int main() {
         near(noTail.peakTimeNs(), peak, 1e-6, "Analytic beta=0 peak time");
         for (int i = 0; i < 10000; ++i) require(noTail.value(i*.1) >= 0, "beta=0 tail");
         const double referenceWidth = width(p);
-        for (double amplitude : {1.0, 100.0, 12000.0, 1e6}) {
+        for (double amplitude : {1e-6, 0.001, 0.1, 1.0, 10.0}) {
             parameters = {}; parameters.amplitude = amplitude;
             PulseModel scaled(parameters);
             near(width(scaled), referenceWidth, .001, "FWHM changed with A");
             for (double t : {1.0, 10.0, 50.0, 200.0})
-                near(scaled.value(t)/amplitude, p.value(t)/12000, 1e-14, "Shape changed with A");
+                near(scaled.value(t)/amplitude, p.value(t)/p.parameters().amplitude, 1e-14, "Shape changed with A");
         }
         SignalSynthesisService service;
         // Check allocation boundaries without allocating a maximum-size signal.
@@ -62,14 +62,14 @@ int main() {
         for (double fs : {4e8, 8e8, 2e9}) {
             const auto signal = service.synthesize(p, {t0}, 4e-6, fs, 0, rng);
             for (std::size_t k = 0; k < signal.size(); ++k)
-                near(signal[k], p.value((k/fs-t0)*1e9), 12000e-12, "Output grid / fractional t0");
+                near(signal[k], p.value((k/fs-t0)*1e9), 1e-12, "Output grid / fractional t0");
         }
         auto summed = service.synthesize(p, {t0, t0+30e-9}, 4e-6, 8e8, 0, rng);
         for (std::size_t k = 0; k < summed.size(); ++k)
             near(summed[k], p.value((k/8e8-t0)*1e9)+p.value((k/8e8-t0-30e-9)*1e9), 3e-8, "Pile-up");
         auto sampled = service.synthesize(p, {t0}, 4e-6, 8e8, 0, rng,
             [](std::mt19937 &) { return 25.0; });
-        near(sampled[100], p.value((100/8e8-t0)*1e9)*25/12000, 1e-12, "Sampler returns absolute A");
+        near(sampled[100], p.value((100/8e8-t0)*1e9)*25/p.parameters().amplitude, 1e-12, "Sampler returns absolute A");
         auto baseline = service.synthesize(p, {}, 1e-6, 8e8, 0, rng);
         require(std::all_of(baseline.begin(), baseline.end(), [](double v) { return v == 0; }), "Zero baseline");
         std::mt19937 r1(42), r2(42);

@@ -103,7 +103,7 @@ private:
 
     // Charts
     SignalPlotWidget *m_signalPlotWidget = nullptr;
-    QChartView *m_pulseChartView  = nullptr;
+    SignalPlotWidget *m_pulsePlotWidget = nullptr;
     QChartView *m_spectrumChartView  = nullptr;
 
     // Last generated signal (for CSV and WLF export)

@@ -8,6 +8,7 @@
 class QCustomPlot;
 class QCPGraph;
 class QCPRange;
+class QCPTextElement;
 
 enum class SignalPlotMode {
     TimeSignal,
@@ -74,6 +75,7 @@ private:
                              QVector<double> &y) const;
 
     QCustomPlot *m_plot = nullptr;
+    QCPTextElement *m_titleElement = nullptr;
     QCPGraph    *m_graph = nullptr;
     QCPGraph    *m_graph2 = nullptr; // used only for combined spectrum
 
