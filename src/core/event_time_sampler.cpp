@@ -38,7 +38,8 @@ void EventTimeSampler::setDistribution(std::unique_ptr<Distribution> d){
 }
 std::vector<double> EventTimeSampler::generateTimes(double rateHz, double durationSec, std::mt19937 &rng) const
 {
-    if (!m_distribution)
+    if (!m_distribution || !std::isfinite(rateHz) || rateHz <= 0.0 ||
+        !std::isfinite(durationSec) || durationSec <= 0.0)
         return {};
     return m_distribution->generateTimes(rateHz, durationSec, rng);
 }

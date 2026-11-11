@@ -10,6 +10,7 @@
 #include <QtCharts/QLineSeries>
 
 #include "values_provider.h"
+#include "pulse_model.h"
 
 class SignalPlotWidget;
 
@@ -28,7 +29,6 @@ class MainWindow;
 }
 QT_END_NAMESPACE
 
-class TemplateLoader;
 class AmplitudeSpectrum;
 class EventTimeSampler;
 class SignalSynthesisService;
@@ -46,7 +46,6 @@ public:
     ~MainWindow() override;
 
 private slots:
-    void onLoadPulseTemplate();
     void onLoadAmplitudeSpectrum();
     void onGenerate();
     void onResetSignalZoom();
@@ -57,13 +56,13 @@ private:
     void buildUi();
     void updateAmplitudeSpectrumChart();
     void updateSignalChart(const std::vector<double> &signal, double sampleRateHz);
-    void updateTemplateChart(const std::vector<double> &pulseTemplate);
+    void updatePulseChart();
+    PulseParameters pulseParameters() const;
 
     void generateWlfFile(QFile &file, QString wlfFileName, QString dataTxtFilePath);
 
     Ui::MainWindow *ui;
 
-    TemplateLoader        *m_templateLoader      = nullptr;
     AmplitudeSpectrum     *m_amplitudeSpectrum   = nullptr;
     EventTimeSampler      *m_eventSampler        = nullptr;
     SignalSynthesisService *m_synthService       = nullptr;
@@ -71,8 +70,11 @@ private:
     std::mt19937 m_rng;
 
     // Controls
-    QLineEdit   *m_templatePathEdit   = nullptr;
-    QPushButton *m_loadTemplateButton = nullptr;
+    QDoubleSpinBox *m_pulseAmplitudeSpin = nullptr;
+    QDoubleSpinBox *m_riseTimeSpin = nullptr;
+    QDoubleSpinBox *m_fallTimeSpin = nullptr;
+    QDoubleSpinBox *m_betaSpin = nullptr;
+    QDoubleSpinBox *m_pretriggerSpin = nullptr;
 
     QLineEdit   *m_spectrumPathEdit   = nullptr;
     QPushButton *m_loadSpectrumButton = nullptr;
@@ -82,7 +84,6 @@ private:
     QDoubleSpinBox *m_durationSpin    = nullptr;
     QDoubleSpinBox *m_sampleRateSpin  = nullptr;
     QDoubleSpinBox *m_noiseLevelSpin  = nullptr;
-    QDoubleSpinBox *m_offsetSpin      = nullptr;
     QSpinBox       *m_seedSpin        = nullptr;
 
     QPushButton *m_generateButton     = nullptr;
@@ -100,7 +101,7 @@ private:
 
     // Charts
     SignalPlotWidget *m_signalPlotWidget = nullptr;
-    QChartView *m_templateChartView  = nullptr;
+    QChartView *m_pulseChartView  = nullptr;
     QChartView *m_spectrumChartView  = nullptr;
 
     // Last generated signal (for CSV and WLF export)

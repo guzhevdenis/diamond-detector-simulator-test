@@ -2,7 +2,9 @@
 #include "./ui_mainwindow.h"
 
 #include "amplifiermodelwidget.h"
-#include "template_loader.h"
+#include <cmath>
+#include <stdexcept>
+#include <QScrollArea>
 #include "amplitude_spectrum.h"
 #include "event_time_sampler.h"
 #include "signal_synthesis_service.h"
@@ -37,7 +39,6 @@
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
-    , m_templateLoader(new TemplateLoader)
     , m_amplitudeSpectrum(new AmplitudeSpectrum)
     , m_eventSampler(new EventTimeSampler)
     , m_synthService(new SignalSynthesisService)
@@ -52,7 +53,6 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
-    delete m_templateLoader;
     delete m_amplitudeSpectrum;
     delete m_eventSampler;
     delete m_synthService;
@@ -81,13 +81,23 @@ void MainWindow::buildUi()
 
     int row = 0;
 
-    // Pulse template
-    controlsLayout->addWidget(new QLabel(tr("Pulse template:"), this), row, 0);
-    m_templatePathEdit = new QLineEdit(this);
-    m_loadTemplateButton = new QPushButton(tr("Load Pulse Template"), this);
-    controlsLayout->addWidget(m_templatePathEdit, row, 1);
-    controlsLayout->addWidget(m_loadTemplateButton, row, 2);
-    ++row;
+    // Specification v1.0: adjustable A, tau_r, tau_f, beta.
+    auto addParameter = [&](const QString &label, double low, double high,
+                            double value, int decimals) {
+        auto *spin = new QDoubleSpinBox(this);
+        spin->setDecimals(decimals);
+        spin->setRange(low, high);
+        spin->setValue(value);
+        controlsLayout->addWidget(new QLabel(label, this), row, 0);
+        controlsLayout->addWidget(spin, row++, 1);
+        return spin;
+    };
+    m_pulseAmplitudeSpin = addParameter(tr("Pulse amplitude A:"), 0, 1e9, 12000, 3);
+    m_riseTimeSpin = addParameter(tr("Rise constant tau_r [ns]:"), 0.001, 1e6, 6, 3);
+    m_fallTimeSpin = addParameter(tr("Fall constant tau_f [ns]:"), 0.001, 1e6, 20, 3);
+    m_betaSpin = addParameter(tr("Negative tail coefficient beta:"), 0, 1000, 0.08, 6);
+    m_pretriggerSpin = addParameter(tr("Pre-trigger [ns]:"), 0, 1e9, 100, 3);
+    controlsLayout->addWidget(new QLabel(tr("Fixed: tau_u = 100 ns; baseline = 0. A is the positive peak height."), this), row++, 0, 1, 3);
 
     // Amplitude spectrum
     controlsLayout->addWidget(new QLabel(tr("Amplitude spectrum:"), this), row, 0);
@@ -108,23 +118,25 @@ void MainWindow::buildUi()
     // Amplitude distribution
     controlsLayout->addWidget(new QLabel(tr("Amplitude distribution:"), this), row, 0);
     m_ampDistCombo = new QComboBox(this);
-    m_ampDistCombo->addItem(tr("From file (if loaded)")); // index 0
+    m_ampDistCombo->addItem(tr("From file")); // index 0
     m_ampDistCombo->addItem(tr("Normal"));                // index 1
     m_ampDistCombo->addItem(tr("Exponential"));           // index 2
     m_ampDistCombo->addItem(tr("Log-normal"));            // index 3
+    m_ampDistCombo->addItem(tr("Constant A (pulse model)")); // index 4
+    m_ampDistCombo->setCurrentIndex(4);
     controlsLayout->addWidget(m_ampDistCombo, row, 1);
     ++row;
 
     // Normal parameters
     controlsLayout->addWidget(new QLabel(tr("Normal mean / sigma:"), this), row, 0);
     m_normMeanSpin = new QDoubleSpinBox(this);
-    m_normMeanSpin->setRange(-1e6, 1e6);
+    m_normMeanSpin->setRange(0, 1e9);
     m_normMeanSpin->setDecimals(6);
-    m_normMeanSpin->setValue(1.0);
+    m_normMeanSpin->setValue(12000);
     m_normSigmaSpin = new QDoubleSpinBox(this);
     m_normSigmaSpin->setRange(1e-6, 1e6);
     m_normSigmaSpin->setDecimals(6);
-    m_normSigmaSpin->setValue(0.1);
+    m_normSigmaSpin->setValue(1200);
     controlsLayout->addWidget(m_normMeanSpin, row, 1);
     controlsLayout->addWidget(m_normSigmaSpin, row, 2);
     ++row;
@@ -165,7 +177,7 @@ void MainWindow::buildUi()
     controlsLayout->addWidget(new QLabel(tr("Duration [s]:"), this), row, 0);
     m_durationSpin = new QDoubleSpinBox(this);
     m_durationSpin->setRange(0.0, 10.0);
-    m_durationSpin->setDecimals(6);
+    m_durationSpin->setDecimals(9);
     m_durationSpin->setValue(1e-3);
     controlsLayout->addWidget(m_durationSpin, row, 1);
     ++row;
@@ -175,7 +187,7 @@ void MainWindow::buildUi()
     m_sampleRateSpin = new QDoubleSpinBox(this);
     m_sampleRateSpin->setRange(1.0, 1e12);
     m_sampleRateSpin->setDecimals(0);
-    // The recorded template is sampled at 800 MHz
+    // Output sampling frequency is independent of model normalization.
     m_sampleRateSpin->setValue(8e8);
     controlsLayout->addWidget(m_sampleRateSpin, row, 1);
     ++row;
@@ -187,15 +199,6 @@ void MainWindow::buildUi()
     m_noiseLevelSpin->setDecimals(6);
     m_noiseLevelSpin->setValue(0.0);
     controlsLayout->addWidget(m_noiseLevelSpin, row, 1);
-    ++row;
-
-    // Offset
-    controlsLayout->addWidget(new QLabel(tr("Offset:"), this), row, 0);
-    m_offsetSpin = new QDoubleSpinBox(this);
-    m_offsetSpin->setRange(-1e3, 1e3);
-    m_offsetSpin->setDecimals(6);
-    m_offsetSpin->setValue(0.0);
-    controlsLayout->addWidget(m_offsetSpin, row, 1);
     ++row;
 
     // Random seed
@@ -220,7 +223,12 @@ void MainWindow::buildUi()
 
     controlsLayout->addLayout(exportButtonsLayout, row, 1, 1, 1);
 
-    genLayout->addLayout(controlsLayout);
+    auto *controlsWidget = new QWidget(this);
+    controlsWidget->setLayout(controlsLayout);
+    auto *controlsScroll = new QScrollArea(this);
+    controlsScroll->setWidgetResizable(true);
+    controlsScroll->setWidget(controlsWidget);
+    genLayout->addWidget(controlsScroll, 1);
 
     // Charts
     auto *chartsLayout = new QGridLayout();
@@ -229,21 +237,21 @@ void MainWindow::buildUi()
     m_signalPlotWidget->setAxisLabels(tr("Time [ns]"), tr("Amplitude"));
     m_signalPlotWidget->setTitle(tr("Generated Signal"));
 
-    m_templateChartView = new QChartView(new QChart(), this);
+    m_pulseChartView = new QChartView(new QChart(), this);
     m_spectrumChartView = new QChartView(new QChart(), this);
 
-    m_templateChartView->chart()->setTitle(tr("Pulse Template"));
+    m_pulseChartView->chart()->setTitle(tr("Pulse Model"));
     m_spectrumChartView->chart()->setTitle(tr("Amplitude Spectrum"));
 
-    // Enable rubber-band zoom for spectrum and template charts
-    m_templateChartView->setRubberBand(QChartView::RectangleRubberBand);
+    // Enable rubber-band zoom for spectrum and pulse model charts
+    m_pulseChartView->setRubberBand(QChartView::RectangleRubberBand);
     m_spectrumChartView->setRubberBand(QChartView::RectangleRubberBand);
 
     chartsLayout->addWidget(m_signalPlotWidget,   0, 0);
-    chartsLayout->addWidget(m_templateChartView, 0, 1);
+    chartsLayout->addWidget(m_pulseChartView, 0, 1);
     chartsLayout->addWidget(m_spectrumChartView, 1, 0);
 
-    genLayout->addLayout(chartsLayout);
+    genLayout->addLayout(chartsLayout, 1);
 
     tabWidget->addTab(genPage, tr("Signal Generator"));
 
@@ -257,8 +265,28 @@ void MainWindow::buildUi()
     tabWidget->addTab(ampWidget, tr("Amplifier Model"));
     tabWidget->addTab(spectrumWidget, tr("Spectrum Analysis"));
 
-    connect(m_loadTemplateButton, &QPushButton::clicked,
-            this, &MainWindow::onLoadPulseTemplate);
+    for (auto *spin : {m_pulseAmplitudeSpin, m_riseTimeSpin, m_fallTimeSpin, m_betaSpin, m_pretriggerSpin, m_sampleRateSpin})
+        connect(spin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this] { updatePulseChart(); });
+    auto updateAmplitudeControls = [this] {
+        const int mode = m_ampDistCombo->currentIndex();
+        m_pulseAmplitudeSpin->setEnabled(mode == 4);
+        m_normMeanSpin->setEnabled(mode == 1);
+        m_normSigmaSpin->setEnabled(mode == 1);
+        m_expLambdaSpin->setEnabled(mode == 2);
+        m_logMuSpin->setEnabled(mode == 3);
+        m_logSigmaSpin->setEnabled(mode == 3);
+        m_spectrumPathEdit->setEnabled(mode == 0);
+        updateAmplitudeSpectrumChart();
+    };
+    connect(m_ampDistCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
+            [updateAmplitudeControls](int) { updateAmplitudeControls(); });
+    m_pulseAmplitudeSpin->setToolTip(tr("Used for Constant A mode and the single-pulse preview. Distributions supply each event's A directly."));
+    m_pretriggerSpin->setToolTip(tr("Leading baseline interval. The end of the array is reserved for tail decay."));
+    m_generateButton->setToolTip(tr("Generates pulses from the analytic model; no pulse template file is needed."));
+    m_exportCsvButton->setEnabled(false);
+    m_exportWlfButton->setEnabled(false);
+    updateAmplitudeControls();
+    updatePulseChart();
     connect(m_loadSpectrumButton, &QPushButton::clicked,
             this, &MainWindow::onLoadAmplitudeSpectrum);
     connect(m_generateButton, &QPushButton::clicked,
@@ -279,24 +307,6 @@ double MainWindow::getDurationValue() const
 double MainWindow::getSampleRateValue() const
 {
     return m_sampleRateSpin->value();
-}
-
-void MainWindow::onLoadPulseTemplate()
-{
-    const QString fileName = QFileDialog::getOpenFileName(
-                this,
-                tr("Select pulse template file"),
-                QString(),
-                tr("Text files (*.txt);;All files (*.*)"));
-    if (!fileName.isEmpty()) {
-        m_templatePathEdit->setText(fileName);
-        const auto &tpl = m_templateLoader->pulseTemplate(fileName);
-        if (tpl.empty()) {
-            QMessageBox::warning(this, tr("Error"), tr("Failed to load pulse template."));
-        } else {
-            updateTemplateChart(tpl);
-        }
-    }
 }
 
 void MainWindow::onLoadAmplitudeSpectrum()
@@ -394,7 +404,7 @@ void MainWindow::generateWlfFile(QFile &file, QString wlfFileName, QString dataT
     xmlWriter.writeEndElement();
 
     xmlWriter.writeStartElement("Duration");
-    xmlWriter.writeCharacters(QString::number(m_sampleRateSpin->value() * m_durationSpin->value(), 'f', 0));
+    xmlWriter.writeCharacters(QString::number(static_cast<qulonglong>(m_lastSignal.size())));
     xmlWriter.writeEndElement();
 
     xmlWriter.writeStartElement("Component");
@@ -422,7 +432,7 @@ void MainWindow::generateWlfFile(QFile &file, QString wlfFileName, QString dataT
     xmlWriter.writeEndElement();
 
     xmlWriter.writeStartElement("Value");
-    xmlWriter.writeCharacters(m_sampleRateSpin->text());
+    xmlWriter.writeCharacters(QString::number(m_lastSampleRateHz, 'g', 16));
     xmlWriter.writeEndElement();
 
     xmlWriter.writeEndElement(); //close Parameters
@@ -514,99 +524,82 @@ void MainWindow::onGenerate()
 {
     m_rng.seed(static_cast<std::mt19937::result_type>(m_seedSpin->value()));
 
-    QString path = m_templatePathEdit->text().trimmed();
-    if (path.isEmpty()) {
-        path = QStringLiteral("DiamondDetectorSignal_amplified.txt");
-        m_templatePathEdit->setText(path);
-    }
+    try {
+        const PulseModel pulse(pulseParameters());
+        updatePulseChart();
 
-    const auto &pulse = m_templateLoader->pulseTemplate(path);
-    if (pulse.empty()) {
-        QMessageBox::warning(this, tr("Error"), tr("Pulse template is empty or could not be loaded."));
-        return;
-    }
-
-    updateTemplateChart(pulse);
-
-    const double durationSec = m_durationSpin->value();
-    const double rateHz = m_eventRateSpin->value();
-    const double sampleRateHz = m_sampleRateSpin->value();
-    const double noiseStdDev = m_noiseLevelSpin->value();
-    const double offset = m_offsetSpin->value();
+        const double durationSec = m_durationSpin->value();
+        const double rateHz = m_eventRateSpin->value();
+        const double sampleRateHz = m_sampleRateSpin->value();
+        const double noiseStdDev = m_noiseLevelSpin->value();
+        if (durationSec * sampleRateHz > 20000000)
+            throw std::invalid_argument("Signal exceeds the limit of 20 million samples.");
+        const double pretriggerSec = m_pretriggerSpin->value() * 1e-9;
+        const double eventWindow = durationSec - pretriggerSec - pulse.settlingTimeNs() * 1e-9;
+        if (eventWindow <= 0)
+            throw std::invalid_argument("Increase duration to include the pre-trigger and pulse tail.");
+        if (rateHz * eventWindow > 1000000)
+            throw std::invalid_argument("Too many events: reduce the rate or duration.");
     
-    std::unique_ptr<Distribution> dist;
+        std::unique_ptr<Distribution> dist;
 
-    if (m_timeDistCombo->currentIndex() == 0) {
-        dist = std::make_unique<FixedIntervalDistribution>();
-    } else {
-        dist = std::make_unique<PoissonDistribution>();
-    }
-    
-    m_eventSampler->setDistribution(std::move(dist));
-
-    const auto eventTimes = m_eventSampler->generateTimes(rateHz, durationSec, m_rng);
-    if (eventTimes.empty()) {
-        QMessageBox::warning(this, tr("Error"), tr("No events generated. Check rate and duration."));
-        return;
-    }
-
-    // Configure amplitude distribution every time:
-    // - If "From file (if loaded)" is selected and a file-based spectrum
-    //   (Samples or Histogram) is available, keep it.
-    // - Otherwise, always apply the selected built-in distribution so that
-    //   changed parameters are reflected every time Generate is pressed.
-    const int ampMode = m_ampDistCombo->currentIndex();
-    const auto specMode = m_amplitudeSpectrum->mode();
-    const bool hasFileSpectrum =
-            (specMode == AmplitudeSpectrum::Mode::Samples ||
-             specMode == AmplitudeSpectrum::Mode::Histogram);
-
-    if (ampMode == 0) {
-        // From file (if loaded). If no valid file spectrum is present,
-        // leave the current built-in configuration as-is.
-        if (!hasFileSpectrum && !m_amplitudeSpectrum->hasData()) {
-            // No spectrum at all: fall back to a simple normal distribution.
-            m_amplitudeSpectrum->setNormal(m_normMeanSpin->value(), m_normSigmaSpin->value());
+        if (m_timeDistCombo->currentIndex() == 0) {
+            dist = std::make_unique<FixedIntervalDistribution>();
+        } else {
+            dist = std::make_unique<PoissonDistribution>();
         }
-    } else if (ampMode == 1) {
-        m_amplitudeSpectrum->setNormal(m_normMeanSpin->value(), m_normSigmaSpin->value());
-    } else if (ampMode == 2) {
-        m_amplitudeSpectrum->setExponential(m_expLambdaSpin->value());
-    } else {
-        m_amplitudeSpectrum->setLogNormal(m_logMuSpin->value(), m_logSigmaSpin->value());
+    
+        m_eventSampler->setDistribution(std::move(dist));
+
+        auto eventTimes = m_eventSampler->generateTimes(rateHz, eventWindow, m_rng);
+        for (double &t : eventTimes) t += pretriggerSec;
+
+        const int ampMode = m_ampDistCombo->currentIndex();
+        if (ampMode == 0) {
+            // Reload the selected spectrum after switching back from built-in modes.
+            if (!m_amplitudeSpectrum->loadFromFile(m_spectrumPathEdit->text().trimmed()))
+                throw std::invalid_argument("Load a valid amplitude spectrum or select Constant A.");
+        } else if (ampMode == 1) {
+            m_amplitudeSpectrum->setNormal(m_normMeanSpin->value(), m_normSigmaSpin->value());
+        } else if (ampMode == 2) {
+            m_amplitudeSpectrum->setExponential(m_expLambdaSpin->value());
+        } else if (ampMode == 3) {
+            m_amplitudeSpectrum->setLogNormal(m_logMuSpin->value(), m_logSigmaSpin->value());
+        }
+        std::function<double(std::mt19937 &)> sampler;
+        if (ampMode != 4)
+            sampler = [this](std::mt19937 &rng) { return m_amplitudeSpectrum->sample(rng); };
+        const auto signal = m_synthService->synthesize(pulse, eventTimes, durationSec,
+                                                    sampleRateHz, noiseStdDev, m_rng, sampler);
+
+        if (signal.empty()) {
+            QMessageBox::warning(this, tr("Error"), tr("Generated signal is empty."));
+            return;
+        }
+
+        // Store last signal for CSV and WLF export
+        m_lastSignal = signal;
+        m_lastSampleRateHz = sampleRateHz;
+        m_exportCsvButton->setEnabled(true);
+        m_exportWlfButton->setEnabled(true);
+
+        updateSignalChart(signal, sampleRateHz);
+        updateAmplitudeSpectrumChart();
+    } catch (const std::exception &e) {
+        QMessageBox::warning(this, tr("Generation error"), QString::fromUtf8(e.what()));
     }
-
-    const auto signal = m_synthService->synthesize(
-                pulse,
-                eventTimes,
-                *m_amplitudeSpectrum,
-                durationSec,
-                sampleRateHz,
-                noiseStdDev,
-                offset,
-                m_rng);
-
-    if (signal.empty()) {
-        QMessageBox::warning(this, tr("Error"), tr("Generated signal is empty."));
-        return;
-    }
-
-    // Store last signal for CSV and WLF export
-    m_lastSignal = signal;
-    m_lastSampleRateHz = sampleRateHz;
-
-    updateSignalChart(signal, sampleRateHz);
-    updateAmplitudeSpectrumChart();
-
 }
 
 void MainWindow::updateAmplitudeSpectrumChart()
 {
     QChart *chart = m_spectrumChartView->chart();
     chart->removeAllSeries();
-    chart->removeAxis(chart->axisX());
-    chart->removeAxis(chart->axisY());
+    for (auto *axis : chart->axes()) { chart->removeAxis(axis); delete axis; }
 
+    if (m_ampDistCombo->currentIndex() == 4) {
+        chart->setTitle(tr("Constant amplitude A = %1").arg(m_pulseAmplitudeSpin->value()));
+        return;
+    }
     if (!m_amplitudeSpectrum->hasData()) {
         chart->setTitle(tr("Amplitude Spectrum (built-in or default)"));
         return;
@@ -682,44 +675,41 @@ void MainWindow::updateSignalChart(const std::vector<double> &signal,
         m_signalPlotWidget->setSignal(signal, sampleRateHz);
 }
 
-void MainWindow::updateTemplateChart(const std::vector<double> &pulseTemplate)
+PulseParameters MainWindow::pulseParameters() const
 {
-    if (!m_templateChartView || !m_templateChartView->chart())
-        return;
+    return {m_pulseAmplitudeSpin->value(), m_riseTimeSpin->value(),
+            m_fallTimeSpin->value(), m_betaSpin->value()};
+}
 
-    QChart *chart = m_templateChartView->chart();
+void MainWindow::updatePulseChart()
+{
+    QChart *chart = m_pulseChartView->chart();
     chart->removeAllSeries();
-    chart->removeAxis(chart->axisX());
-    chart->removeAxis(chart->axisY());
-
-    auto *series = new QLineSeries(chart);
-
-    const std::size_t n = pulseTemplate.size();
-    if (n == 0) {
-        chart->setTitle(tr("Pulse Template"));
-        return;
+    for (auto *axis : chart->axes()) { chart->removeAxis(axis); delete axis; }
+    try {
+        const PulseModel pulse(pulseParameters());
+        auto *series = new QLineSeries(chart);
+        const double pre = m_pretriggerSpin->value();
+        // Preview uses the output time grid; cap displayed points for responsiveness.
+        const double fs = m_sampleRateSpin->value();
+        const double endNs = pre + pulse.settlingTimeNs();
+        const double count = std::ceil(endNs * fs * 1e-9) + 1;
+        const double stride = std::max(1.0, std::ceil(count / 10000.0));
+        for (double k = 0; k < count; k += stride) {
+            const double t = k / fs * 1e9;
+            series->append(t, pulse.value(t - pre));
+        }
+        chart->addSeries(series);
+        auto *axisX = new QValueAxis(chart);
+        axisX->setTitleText(tr("Time [ns]"));
+        chart->addAxis(axisX, Qt::AlignBottom);
+        series->attachAxis(axisX);
+        auto *axisY = new QValueAxis(chart);
+        axisY->setTitleText(tr("Amplitude"));
+        chart->addAxis(axisY, Qt::AlignLeft);
+        series->attachAxis(axisY);
+        chart->setTitle(tr("Pulse Model (A = %1, tau_u = 100 ns)").arg(pulse.parameters().amplitude));
+    } catch (const std::exception &e) {
+        chart->setTitle(QString::fromUtf8(e.what()));
     }
-
-    // Use time in ns based on known sample rate 800 MHz
-    const double sampleRateHz = 8e8;
-    const double dtNs = 1e9 / sampleRateHz; // 1.25 ns per sample
-
-    for (std::size_t i = 0; i < n; ++i) {
-        const double tNs = static_cast<double>(i) * dtNs;
-        series->append(tNs, pulseTemplate[i]);
-    }
-
-    chart->addSeries(series);
-
-    auto *axisX = new QValueAxis(chart);
-    axisX->setTitleText(tr("Time [ns]"));
-    chart->addAxis(axisX, Qt::AlignBottom);
-    series->attachAxis(axisX);
-
-    auto *axisY = new QValueAxis(chart);
-    axisY->setTitleText(tr("Normalized amplitude"));
-    chart->addAxis(axisY, Qt::AlignLeft);
-    series->attachAxis(axisY);
-
-    chart->setTitle(tr("Pulse Template"));
 }
