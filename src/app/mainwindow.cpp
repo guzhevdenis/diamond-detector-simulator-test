@@ -2,6 +2,7 @@
 #include "./ui_mainwindow.h"
 
 #include "amplifiermodelwidget.h"
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <QScrollArea>
@@ -16,7 +17,11 @@
 #include <QWidget>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QGridLayout>
+#include <QFormLayout>
+#include <QSplitter>
+#include <QToolButton>
+#include <QMenu>
+#include <QAction>
 #include <QTabWidget>
 #include <QLabel>
 #include <QLineEdit>
@@ -76,182 +81,187 @@ void MainWindow::buildUi()
     auto *genPage = new QWidget(this);
     auto *genLayout = new QVBoxLayout(genPage);
 
-    // Top controls
-    auto *controlsLayout = new QGridLayout();
+    // The sidebar scrolls independently; charts use the full available height.
+    auto *workspace = new QSplitter(Qt::Horizontal, genPage);
+    workspace->setObjectName(QStringLiteral("generatorWorkspace"));
+    workspace->setChildrenCollapsible(false);
+    workspace->setHandleWidth(6);
+    genLayout->addWidget(workspace, 1);
 
-    int row = 0;
+    auto *controlsScroll = new QScrollArea(workspace);
+    controlsScroll->setObjectName(QStringLiteral("generatorSettings"));
+    controlsScroll->setWidgetResizable(true);
+    controlsScroll->setFrameShape(QFrame::NoFrame);
+    controlsScroll->setMinimumWidth(260);
+    auto *controlsWidget = new QWidget(controlsScroll);
+    auto *settingsLayout = new QVBoxLayout(controlsWidget);
+    settingsLayout->setContentsMargins(6, 6, 6, 6);
+    settingsLayout->setSpacing(8);
+    controlsScroll->setWidget(controlsWidget);
 
-    // Specification v1.0: adjustable A, tau_r, tau_f, beta.
-    auto addParameter = [&](const QString &label, double low, double high,
-                            double value, int decimals) {
-        auto *spin = new QDoubleSpinBox(this);
+    auto addSection = [&](const QString &title, bool expanded) {
+        auto *section = new QWidget(controlsWidget);
+        auto *layout = new QVBoxLayout(section);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(4);
+        auto *header = new QToolButton(section);
+        header->setText(title);
+        header->setCheckable(true);
+        header->setChecked(expanded);
+        header->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        header->setArrowType(expanded ? Qt::DownArrow : Qt::RightArrow);
+        header->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        auto *body = new QWidget(section);
+        auto *form = new QFormLayout(body);
+        form->setContentsMargins(4, 4, 4, 4);
+        form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+        form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+        layout->addWidget(header);
+        layout->addWidget(body);
+        body->setVisible(expanded);
+        connect(header, &QToolButton::toggled, body, [header, body](bool open) {
+            body->setVisible(open);
+            header->setArrowType(open ? Qt::DownArrow : Qt::RightArrow);
+        });
+        settingsLayout->addWidget(section);
+        return form;
+    };
+    auto addParameter = [&](QFormLayout *form, const QString &label,
+                            double low, double high, double value, int decimals) {
+        auto *spin = new QDoubleSpinBox(controlsWidget);
         spin->setDecimals(decimals);
         spin->setRange(low, high);
         spin->setValue(value);
-        controlsLayout->addWidget(new QLabel(label, this), row, 0);
-        controlsLayout->addWidget(spin, row++, 1);
+        spin->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        form->addRow(label, spin);
         return spin;
     };
-    m_pulseAmplitudeSpin = addParameter(tr("Pulse amplitude A:"), 0, 1e9, 12000, 3);
-    m_riseTimeSpin = addParameter(tr("Rise constant tau_r [ns]:"), 0.001, 1e6, 6, 3);
-    m_fallTimeSpin = addParameter(tr("Fall constant tau_f [ns]:"), 0.001, 1e6, 20, 3);
-    m_betaSpin = addParameter(tr("Negative tail coefficient beta:"), 0, 1000, 0.08, 6);
-    m_pretriggerSpin = addParameter(tr("Pre-trigger [ns]:"), 0, 1e9, 100, 3);
-    controlsLayout->addWidget(new QLabel(tr("Fixed: tau_u = 100 ns; baseline = 0. A is the positive peak height."), this), row++, 0, 1, 3);
 
-    // Amplitude spectrum
-    controlsLayout->addWidget(new QLabel(tr("Amplitude spectrum:"), this), row, 0);
-    m_spectrumPathEdit = new QLineEdit(this);
-    m_loadSpectrumButton = new QPushButton(tr("Load Amplitude Spectrum"), this);
-    controlsLayout->addWidget(m_spectrumPathEdit, row, 1);
-    controlsLayout->addWidget(m_loadSpectrumButton, row, 2);
-    ++row;
+    auto *pulseForm = addSection(tr("Pulse model"), true);
+    m_pulseAmplitudeSpin = addParameter(pulseForm, tr("Amplitude A:"), 0, 1e9, 12000, 3);
+    m_riseTimeSpin = addParameter(pulseForm, tr("tau_r [ns]:"), 0.001, 1e6, 6, 3);
+    m_fallTimeSpin = addParameter(pulseForm, tr("tau_f [ns]:"), 0.001, 1e6, 20, 3);
+    m_betaSpin = addParameter(pulseForm, tr("beta:"), 0, 1000, 0.08, 6);
+    auto *modelNote = new QLabel(tr("Fixed: tau_u = 100 ns; baseline = 0. A is the positive peak height."), controlsWidget);
+    modelNote->setWordWrap(true);
+    pulseForm->addRow(modelNote);
 
-    // Time distribution
-    controlsLayout->addWidget(new QLabel(tr("Time distribution:"), this), row, 0);
-    m_timeDistCombo = new QComboBox(this);
-    m_timeDistCombo->addItem(tr("Fixed Interval"));
-    m_timeDistCombo->addItem(tr("Poisson"));
-    controlsLayout->addWidget(m_timeDistCombo, row, 1);
-    ++row;
+    auto *eventsForm = addSection(tr("Event timing"), false);
+    m_timeDistCombo = new QComboBox(controlsWidget);
+    m_timeDistCombo->addItems({tr("Fixed Interval"), tr("Poisson")});
+    eventsForm->addRow(tr("Distribution:"), m_timeDistCombo);
+    m_eventRateSpin = addParameter(eventsForm, tr("Event rate [Hz]:"), 0, 1e9, 1e6, 3);
 
-    // Amplitude distribution
-    controlsLayout->addWidget(new QLabel(tr("Amplitude distribution:"), this), row, 0);
-    m_ampDistCombo = new QComboBox(this);
-    m_ampDistCombo->addItem(tr("From file")); // index 0
-    m_ampDistCombo->addItem(tr("Normal"));                // index 1
-    m_ampDistCombo->addItem(tr("Exponential"));           // index 2
-    m_ampDistCombo->addItem(tr("Log-normal"));            // index 3
-    m_ampDistCombo->addItem(tr("Constant A (pulse model)")); // index 4
+    auto *amplitudeForm = addSection(tr("Amplitudes"), false);
+    m_ampDistCombo = new QComboBox(controlsWidget);
+    // Preserve mode indices used by onGenerate().
+    m_ampDistCombo->addItems({tr("From file"), tr("Normal"), tr("Exponential"),
+                             tr("Log-normal"), tr("Constant A (pulse model)")});
     m_ampDistCombo->setCurrentIndex(4);
-    controlsLayout->addWidget(m_ampDistCombo, row, 1);
-    ++row;
+    amplitudeForm->addRow(tr("Distribution:"), m_ampDistCombo);
 
-    // Normal parameters
-    controlsLayout->addWidget(new QLabel(tr("Normal mean / sigma:"), this), row, 0);
-    m_normMeanSpin = new QDoubleSpinBox(this);
-    m_normMeanSpin->setRange(0, 1e9);
-    m_normMeanSpin->setDecimals(6);
-    m_normMeanSpin->setValue(12000);
-    m_normSigmaSpin = new QDoubleSpinBox(this);
-    m_normSigmaSpin->setRange(1e-6, 1e6);
-    m_normSigmaSpin->setDecimals(6);
-    m_normSigmaSpin->setValue(1200);
-    controlsLayout->addWidget(m_normMeanSpin, row, 1);
-    controlsLayout->addWidget(m_normSigmaSpin, row, 2);
-    ++row;
+    // Hide whole parameter forms, including labels, for inactive distributions.
+    auto addAmplitudePanel = [&] {
+        auto *panel = new QWidget(controlsWidget);
+        auto *form = new QFormLayout(panel);
+        form->setContentsMargins(0, 0, 0, 0);
+        form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+        form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+        amplitudeForm->addRow(panel);
+        return form;
+    };
+    auto *fileForm = addAmplitudePanel();
+    m_spectrumPathEdit = new QLineEdit(controlsWidget);
+    m_spectrumPathEdit->setPlaceholderText(tr("Amplitude spectrum file"));
+    m_loadSpectrumButton = new QPushButton(tr("Load Amplitude Spectrum"), controlsWidget);
+    fileForm->addRow(m_spectrumPathEdit);
+    fileForm->addRow(m_loadSpectrumButton);
+    auto *normalForm = addAmplitudePanel();
+    m_normMeanSpin = addParameter(normalForm, tr("Mean:"), 0, 1e9, 12000, 6);
+    m_normSigmaSpin = addParameter(normalForm, tr("Sigma:"), 1e-6, 1e6, 1200, 6);
+    auto *exponentialForm = addAmplitudePanel();
+    m_expLambdaSpin = addParameter(exponentialForm, tr("Lambda:"), 1e-6, 1e6, 1, 6);
+    auto *logNormalForm = addAmplitudePanel();
+    m_logMuSpin = addParameter(logNormalForm, tr("Mu:"), -1e6, 1e6, 0, 6);
+    m_logSigmaSpin = addParameter(logNormalForm, tr("Sigma:"), 1e-6, 1e6, 0.25, 6);
 
-    // Exponential parameter
-    controlsLayout->addWidget(new QLabel(tr("Exponential lambda:"), this), row, 0);
-    m_expLambdaSpin = new QDoubleSpinBox(this);
-    m_expLambdaSpin->setRange(1e-6, 1e6);
-    m_expLambdaSpin->setDecimals(6);
-    m_expLambdaSpin->setValue(1.0);
-    controlsLayout->addWidget(m_expLambdaSpin, row, 1);
-    ++row;
+    auto *samplingForm = addSection(tr("Sampling and duration"), false);
+    m_durationSpin = addParameter(samplingForm, tr("Duration [s]:"), 0, 10, 1e-3, 9);
+    m_sampleRateSpin = addParameter(samplingForm, tr("Sample rate [Hz]:"), 1, 1e12, 8e8, 0);
+    m_pretriggerSpin = addParameter(samplingForm, tr("Pre-trigger [ns]:"), 0, 1e9, 100, 3);
 
-    // Log-normal parameters
-    controlsLayout->addWidget(new QLabel(tr("Log-normal mu / sigma:"), this), row, 0);
-    m_logMuSpin = new QDoubleSpinBox(this);
-    m_logMuSpin->setRange(-1e6, 1e6);
-    m_logMuSpin->setDecimals(6);
-    m_logMuSpin->setValue(0.0);
-    m_logSigmaSpin = new QDoubleSpinBox(this);
-    m_logSigmaSpin->setRange(1e-6, 1e6);
-    m_logSigmaSpin->setDecimals(6);
-    m_logSigmaSpin->setValue(0.25);
-    controlsLayout->addWidget(m_logMuSpin, row, 1);
-    controlsLayout->addWidget(m_logSigmaSpin, row, 2);
-    ++row;
-
-    // Event rate
-    controlsLayout->addWidget(new QLabel(tr("Event rate [Hz]:"), this), row, 0);
-    m_eventRateSpin = new QDoubleSpinBox(this);
-    m_eventRateSpin->setRange(0.0, 1e9);
-    m_eventRateSpin->setDecimals(3);
-    m_eventRateSpin->setValue(1e6); // example default
-    controlsLayout->addWidget(m_eventRateSpin, row, 1);
-    ++row;
-
-    // Duration
-    controlsLayout->addWidget(new QLabel(tr("Duration [s]:"), this), row, 0);
-    m_durationSpin = new QDoubleSpinBox(this);
-    m_durationSpin->setRange(0.0, 10.0);
-    m_durationSpin->setDecimals(9);
-    m_durationSpin->setValue(1e-3);
-    controlsLayout->addWidget(m_durationSpin, row, 1);
-    ++row;
-
-    // Sample rate
-    controlsLayout->addWidget(new QLabel(tr("Sample rate [Hz]:"), this), row, 0);
-    m_sampleRateSpin = new QDoubleSpinBox(this);
-    m_sampleRateSpin->setRange(1.0, 1e12);
-    m_sampleRateSpin->setDecimals(0);
-    // Output sampling frequency is independent of model normalization.
-    m_sampleRateSpin->setValue(8e8);
-    controlsLayout->addWidget(m_sampleRateSpin, row, 1);
-    ++row;
-
-    // Noise level
-    controlsLayout->addWidget(new QLabel(tr("Noise stddev:"), this), row, 0);
-    m_noiseLevelSpin = new QDoubleSpinBox(this);
-    m_noiseLevelSpin->setRange(0.0, 1e3);
-    m_noiseLevelSpin->setDecimals(6);
-    m_noiseLevelSpin->setValue(0.0);
-    controlsLayout->addWidget(m_noiseLevelSpin, row, 1);
-    ++row;
-
-    // Random seed
-    controlsLayout->addWidget(new QLabel(tr("Random seed:"), this), row, 0);
-    m_seedSpin = new QSpinBox(this);
+    auto *noiseForm = addSection(tr("Noise and random seed"), false);
+    m_noiseLevelSpin = addParameter(noiseForm, tr("Noise stddev:"), 0, 1e3, 0, 6);
+    m_seedSpin = new QSpinBox(controlsWidget);
     m_seedSpin->setRange(0, std::numeric_limits<int>::max());
     m_seedSpin->setValue(12345);
-    controlsLayout->addWidget(m_seedSpin, row, 1);
-    ++row;
+    noiseForm->addRow(tr("Random seed:"), m_seedSpin);
+    settingsLayout->addStretch();
 
-    // Generate / Reset zoom / Export CSV / Export WLF
-    auto *exportButtonsLayout = new QHBoxLayout();
-
-    m_generateButton = new QPushButton(tr("Generate"), this);
-    m_resetZoomButton = new QPushButton(tr("Reset Signal Zoom"), this);
-    m_exportCsvButton = new QPushButton(tr("Export Signal to CSV"), this);
-    m_exportWlfButton = new QPushButton(tr("Export Signal to WLF"), this);
-    controlsLayout->addWidget(m_generateButton, row, 0);
-    exportButtonsLayout->addWidget(m_exportWlfButton, 1);
-    exportButtonsLayout->addWidget(m_exportCsvButton, 1);
-    controlsLayout->addWidget(m_resetZoomButton, row, 2);
-
-    controlsLayout->addLayout(exportButtonsLayout, row, 1, 1, 1);
-
-    auto *controlsWidget = new QWidget(this);
-    controlsWidget->setLayout(controlsLayout);
-    auto *controlsScroll = new QScrollArea(this);
-    controlsScroll->setWidgetResizable(true);
-    controlsScroll->setWidget(controlsWidget);
-    genLayout->addWidget(controlsScroll, 1);
-
-    // Charts
-    auto *chartsLayout = new QGridLayout();
-
-    m_signalPlotWidget = new SignalPlotWidget(this);
+    auto *charts = new QSplitter(Qt::Vertical, workspace);
+    charts->setObjectName(QStringLiteral("generatorCharts"));
+    charts->setChildrenCollapsible(false);
+    charts->setHandleWidth(6);
+    m_signalPlotWidget = new SignalPlotWidget(charts);
+    m_signalPlotWidget->setMinimumSize(240, 160);
     m_signalPlotWidget->setAxisLabels(tr("Time [ns]"), tr("Amplitude"));
     m_signalPlotWidget->setTitle(tr("Generated Signal"));
 
-    m_pulseChartView = new QChartView(new QChart(), this);
-    m_spectrumChartView = new QChartView(new QChart(), this);
-
+    auto *detailCharts = new QSplitter(Qt::Horizontal, charts);
+    detailCharts->setChildrenCollapsible(false);
+    detailCharts->setHandleWidth(6);
+    m_pulseChartView = new QChartView(new QChart(), detailCharts);
+    m_spectrumChartView = new QChartView(new QChart(), detailCharts);
     m_pulseChartView->chart()->setTitle(tr("Pulse Model"));
     m_spectrumChartView->chart()->setTitle(tr("Amplitude Spectrum"));
+    for (auto *view : {m_pulseChartView, m_spectrumChartView}) {
+        view->setMinimumSize(160, 120);
+        view->setRubberBand(QChartView::RectangleRubberBand);
+        view->chart()->legend()->hide();
+        view->chart()->setMargins(QMargins(4, 4, 4, 4));
+    }
+    workspace->addWidget(controlsScroll);
+    workspace->addWidget(charts);
+    charts->addWidget(m_signalPlotWidget);
+    charts->addWidget(detailCharts);
+    detailCharts->addWidget(m_pulseChartView);
+    detailCharts->addWidget(m_spectrumChartView);
+    workspace->setStretchFactor(0, 0);
+    workspace->setStretchFactor(1, 1);
+    workspace->setSizes({320, 800});
+    charts->setStretchFactor(0, 3);
+    charts->setStretchFactor(1, 2);
+    charts->setSizes({420, 280});
+    detailCharts->setSizes({400, 400});
 
-    // Enable rubber-band zoom for spectrum and pulse model charts
-    m_pulseChartView->setRubberBand(QChartView::RectangleRubberBand);
-    m_spectrumChartView->setRubberBand(QChartView::RectangleRubberBand);
-
-    chartsLayout->addWidget(m_signalPlotWidget,   0, 0);
-    chartsLayout->addWidget(m_pulseChartView, 0, 1);
-    chartsLayout->addWidget(m_spectrumChartView, 1, 0);
-
-    genLayout->addLayout(chartsLayout, 1);
+    // Actions remain available when the sidebar is hidden or scrolled.
+    auto *actionsLayout = new QHBoxLayout();
+    auto *settingsButton = new QPushButton(tr("Hide settings"), genPage);
+    settingsButton->setCheckable(true);
+    settingsButton->setChecked(true);
+    connect(settingsButton, &QPushButton::toggled, controlsScroll,
+            [workspace, controlsScroll, settingsButton, sidebarWidth = 320](bool visible) mutable {
+        if (!visible) sidebarWidth = workspace->sizes().value(0, 320);
+        controlsScroll->setVisible(visible);
+        if (visible)
+            workspace->setSizes({sidebarWidth, std::max(1, workspace->width() - sidebarWidth - workspace->handleWidth())});
+        settingsButton->setText(visible ? tr("Hide settings") : tr("Show settings"));
+    });
+    m_generateButton = new QPushButton(tr("Generate"), genPage);
+    m_resetZoomButton = new QPushButton(tr("Reset Signal Zoom"), genPage);
+    auto *exportButton = new QToolButton(genPage);
+    exportButton->setText(tr("Export"));
+    exportButton->setPopupMode(QToolButton::InstantPopup);
+    auto *exportMenu = new QMenu(exportButton);
+    m_exportCsvAction = exportMenu->addAction(tr("Export Signal to CSV"));
+    m_exportWlfAction = exportMenu->addAction(tr("Export Signal to WLF"));
+    exportButton->setMenu(exportMenu);
+    actionsLayout->addWidget(settingsButton);
+    actionsLayout->addWidget(m_generateButton);
+    actionsLayout->addWidget(m_resetZoomButton);
+    actionsLayout->addStretch();
+    actionsLayout->addWidget(exportButton);
+    genLayout->addLayout(actionsLayout);
 
     tabWidget->addTab(genPage, tr("Signal Generator"));
 
@@ -267,15 +277,13 @@ void MainWindow::buildUi()
 
     for (auto *spin : {m_pulseAmplitudeSpin, m_riseTimeSpin, m_fallTimeSpin, m_betaSpin, m_pretriggerSpin, m_sampleRateSpin})
         connect(spin, qOverload<double>(&QDoubleSpinBox::valueChanged), this, [this] { updatePulseChart(); });
-    auto updateAmplitudeControls = [this] {
+    auto updateAmplitudeControls = [this, fileForm, normalForm, exponentialForm, logNormalForm] {
         const int mode = m_ampDistCombo->currentIndex();
         m_pulseAmplitudeSpin->setEnabled(mode == 4);
-        m_normMeanSpin->setEnabled(mode == 1);
-        m_normSigmaSpin->setEnabled(mode == 1);
-        m_expLambdaSpin->setEnabled(mode == 2);
-        m_logMuSpin->setEnabled(mode == 3);
-        m_logSigmaSpin->setEnabled(mode == 3);
-        m_spectrumPathEdit->setEnabled(mode == 0);
+        fileForm->parentWidget()->setVisible(mode == 0);
+        normalForm->parentWidget()->setVisible(mode == 1);
+        exponentialForm->parentWidget()->setVisible(mode == 2);
+        logNormalForm->parentWidget()->setVisible(mode == 3);
         updateAmplitudeSpectrumChart();
     };
     connect(m_ampDistCombo, qOverload<int>(&QComboBox::currentIndexChanged), this,
@@ -283,8 +291,8 @@ void MainWindow::buildUi()
     m_pulseAmplitudeSpin->setToolTip(tr("Used for Constant A mode and the single-pulse preview. Distributions supply each event's A directly."));
     m_pretriggerSpin->setToolTip(tr("Leading baseline interval. The end of the array is reserved for tail decay."));
     m_generateButton->setToolTip(tr("Generates pulses from the analytic model; no pulse template file is needed."));
-    m_exportCsvButton->setEnabled(false);
-    m_exportWlfButton->setEnabled(false);
+    m_exportCsvAction->setEnabled(false);
+    m_exportWlfAction->setEnabled(false);
     updateAmplitudeControls();
     updatePulseChart();
     connect(m_loadSpectrumButton, &QPushButton::clicked,
@@ -293,9 +301,9 @@ void MainWindow::buildUi()
             this, &MainWindow::onGenerate);
     connect(m_resetZoomButton, &QPushButton::clicked,
             this, &MainWindow::onResetSignalZoom);
-    connect(m_exportCsvButton, &QPushButton::clicked,
+    connect(m_exportCsvAction, &QAction::triggered,
             this, &MainWindow::onExportCsv);
-    connect(m_exportWlfButton, &QPushButton::clicked,
+    connect(m_exportWlfAction, &QAction::triggered,
             this, &MainWindow::onExportWlf);
 }
 
@@ -580,8 +588,8 @@ void MainWindow::onGenerate()
         // Store last signal for CSV and WLF export
         m_lastSignal = signal;
         m_lastSampleRateHz = sampleRateHz;
-        m_exportCsvButton->setEnabled(true);
-        m_exportWlfButton->setEnabled(true);
+        m_exportCsvAction->setEnabled(true);
+        m_exportWlfAction->setEnabled(true);
 
         updateSignalChart(signal, sampleRateHz);
         updateAmplitudeSpectrumChart();

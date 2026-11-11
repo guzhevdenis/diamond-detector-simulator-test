@@ -14,6 +14,7 @@
 
 class SignalPlotWidget;
 
+class QAction;
 class QLineEdit;
 class QPushButton;
 class QComboBox;
@@ -88,8 +89,8 @@ private:
 
     QPushButton *m_generateButton     = nullptr;
     QPushButton *m_resetZoomButton    = nullptr;
-    QPushButton *m_exportCsvButton    = nullptr;
-    QPushButton *m_exportWlfButton    = nullptr;
+    QAction     *m_exportCsvAction    = nullptr;
+    QAction     *m_exportWlfAction    = nullptr;
 
     // Amplitude distribution (built-in)
     QComboBox      *m_ampDistCombo    = nullptr;
