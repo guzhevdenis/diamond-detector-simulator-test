@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/pulse-model">
+        <file alias="formula.png">pulse-model-formula.png</file>
+    </qresource>
+</RCC>

@@ -1,0 +1,16 @@
+Use case: scientific-educational. Asset type: a mathematical formula plate to embed in a Qt scientific application's Pulse Model help panel. Create a pristine high-resolution bitmap that looks EXACTLY like professionally typeset LaTeX Computer Modern mathematics, dark black ink on pure white background, flat straight-on, no texture, no decorative objects, no title, no watermark. Landscape 3:2 aspect ratio, modest white margins; equations occupy most of the canvas. Render precisely these TWO mathematical expressions, with generous vertical spacing and large readable glyphs:
+\[
+F(x)=
+\begin{cases}
+0, & x<0,\\[6pt]
+\begin{aligned}
+ &e^{-x/\tau_f}-e^{-x/\tau_r}\\[-1pt]
+ &\quad-\beta\left(e^{-x/\tau_u}-e^{-x/\tau_r}\right),
+\end{aligned}
+& x\ge 0 .
+\end{cases}
+\]
+\[
+F_{\max}=\max_{x\ge 0}F(x).
+\]
+Essential accuracy: the second exponential in BOTH differences has subscript r; the first difference uses tau_f and tau_r, the beta term uses tau_u and tau_r. The coefficient is MINUS beta times the ENTIRE parenthesis. Use a real tall left brace for the piecewise definition, proper superscripts for the complete negative exponents, actual Greek tau and beta, proper f/r/u subscripts on tau, and a genuine subscript x >= 0 directly BELOW the max operator in the second expression. F_max is the maximum of F(x), not the maximum absolute value. Do not render LaTeX command text or dollar signs. The multiline positive-time expression must clearly be ONE case with x >= 0 at its right. Use large math type to remain legible in a narrow application panel.

@@ -38,6 +38,7 @@ find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Charts Concurrent Prin
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Charts Concurrent PrintSupport)
 
 set(PROJECT_SOURCES
+    assets/pulse_model.qrc
     src/app/main.cpp
     src/app/mainwindow.cpp
     src/app/mainwindow.h

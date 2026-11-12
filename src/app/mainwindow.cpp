@@ -33,6 +33,10 @@
 #include <QAction>
 #include <QTabWidget>
 #include <QLabel>
+#include <QPixmap>
+#include <QIcon>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QComboBox>
@@ -157,15 +161,41 @@ void MainWindow::buildUi()
     modelFormula->setText(tr(
         "<p><b>Pulse model</b><br/>"
         "x = t &minus; t<sub>0</sub><br/>"
-        "y(t) = y<sub>0</sub> + <b>A</b> &middot; F(x) / F<sub>max</sub></p>"
-        "<p>For x &ge; 0:<br/>"
-        "F(x) = e<sup>&minus;x/<b>&tau;<sub>f</sub></b></sup>"
-        " &minus; e<sup>&minus;x/<b>&tau;<sub>r</sub></b></sup><br/>"
-        "&nbsp;&nbsp;&minus; <b>&beta;</b> &middot; "
-        "(e<sup>&minus;x/&tau;<sub>u</sub></sup>"
-        " &minus; e<sup>&minus;x/<b>&tau;<sub>r</sub></b></sup>)<br/>"
-        "For x &lt; 0: F(x) = 0.<br/>"
-        "F<sub>max</sub> = max<sub>x &ge; 0</sub> F(x).</p>"
+        "y(t) = y<sub>0</sub> + <b>A</b> &middot; F(x) / F<sub>max</sub></p>"));
+    pulseForm->addRow(modelFormula);
+
+    const QPixmap formulaPixmap(QStringLiteral(":/pulse-model/formula.png"));
+    auto *formulaImageButton = new QPushButton(controlsWidget);
+    formulaImageButton->setIcon(QIcon(formulaPixmap));
+    formulaImageButton->setIconSize(formulaPixmap.size().scaled(260, 200, Qt::KeepAspectRatio));
+    formulaImageButton->setFlat(true);
+    formulaImageButton->setCursor(Qt::PointingHandCursor);
+    formulaImageButton->setToolTip(tr("Click to open the formula at full resolution."));
+    formulaImageButton->setAccessibleName(tr("F(x) and Fmax formulas. Open full-size image."));
+    pulseForm->addRow(formulaImageButton);
+    connect(formulaImageButton, &QPushButton::clicked, this, [this, formulaPixmap] {
+        QDialog viewer(this);
+        viewer.setWindowTitle(tr("Pulse Model - F(x) and Fmax"));
+        viewer.resize(1000, 720);
+        auto *layout = new QVBoxLayout(&viewer);
+        auto *scroll = new QScrollArea(&viewer);
+        auto *image = new QLabel(scroll);
+        image->setPixmap(formulaPixmap);
+        image->setFixedSize(formulaPixmap.size());
+        scroll->setWidget(image);
+        scroll->setAlignment(Qt::AlignCenter);
+        layout->addWidget(scroll);
+        auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &viewer);
+        connect(buttons, &QDialogButtonBox::rejected, &viewer, &QDialog::reject);
+        layout->addWidget(buttons);
+        viewer.exec();
+    });
+
+    auto *parameterLegend = new QLabel(controlsWidget);
+    parameterLegend->setTextFormat(Qt::RichText);
+    parameterLegend->setWordWrap(true);
+    parameterLegend->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    parameterLegend->setText(tr(
         "<p><b>Adjustable parameters</b><br/>"
         "<b>A</b>: positive peak height [V]<br/>"
         "<b>&tau;<sub>r</sub></b> (tau_r): rise constant [ns]<br/>"
@@ -174,7 +204,7 @@ void MainWindow::buildUi()
         "<p>Fixed: &tau;<sub>u</sub> = 100 ns; y<sub>0</sub> = 0 V.<br/>"
         "t<sub>0</sub>: event start time.<br/>"
         "Normalization is independent of the output sample rate.</p>"));
-    pulseForm->addRow(modelFormula);
+    pulseForm->addRow(parameterLegend);
 
     auto *eventsForm = addSection(tr("Event timing"), false);
     m_timeDistCombo = new QComboBox(controlsWidget);
