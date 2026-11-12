@@ -36,6 +36,7 @@ public:
                               std::vector<double> &binCenters,
                               std::vector<double> &binCounts) const;
 
+    const std::vector<double> &samples() const { return m_samples; }
     const std::vector<double> &histAmplitudes() const { return m_histAmplitudes; }
     const std::vector<double> &histWeights() const { return m_histWeights; }
 

@@ -41,6 +41,8 @@ void SignalPlotWidget::setSharedSignal(std::shared_ptr<const std::vector<double>
                                       double sampleRateHz)
 {
     m_mode = SignalPlotMode::TimeSignal;
+    m_graph->setLineStyle(QCPGraph::lsLine);
+    m_graph->setScatterStyle(QCPScatterStyle::ssNone);
     m_signal = samples ? std::move(samples) : std::make_shared<const std::vector<double>>();
     m_sampleRateHz = sampleRateHz;
     m_timesSeconds.clear();
@@ -66,16 +68,19 @@ void SignalPlotWidget::setSignalWithTimes(const std::vector<double> &timesSecond
 }
 
 void SignalPlotWidget::setSpectrum(const std::vector<double> &centers,
-                                   const std::vector<double> &counts)
+                                   const std::vector<double> &counts, bool percentages)
 {
     m_mode = SignalPlotMode::SpectrumSingle;
+    m_spectrumPercentages = percentages;
 
     m_specX = QVector<double>(centers.begin(), centers.end());
     m_specY = QVector<double>(counts.begin(), counts.end());
     m_hasSpectrum = !m_specX.isEmpty() && m_specX.size() == m_specY.size();
     m_hasCombinedSpectrum = false;
-
+    m_graph->setLineStyle(percentages ? (centers.size() == 1 ? QCPGraph::lsImpulse : QCPGraph::lsStepCenter) : QCPGraph::lsLine);
+    m_graph->setScatterStyle(percentages && centers.size() == 1 ? QCPScatterStyle(QCPScatterStyle::ssDisc, 6) : QCPScatterStyle(QCPScatterStyle::ssNone));
     if (!m_hasSpectrum) {
+        m_graph->data()->clear();
         m_plot->replot(QCustomPlot::rpQueuedReplot);
         return;
     }
@@ -85,7 +90,7 @@ void SignalPlotWidget::setSpectrum(const std::vector<double> &centers,
 
     m_specMinX = *minMaxX.first;
     m_specMaxX = *minMaxX.second;
-    m_specMinY = *minMaxY.first;
+    m_specMinY = percentages ? 0.0 : *minMaxY.first;
     m_specMaxY = *minMaxY.second;
 
     if (m_specMinX == m_specMaxX) {
@@ -100,7 +105,7 @@ void SignalPlotWidget::setSpectrum(const std::vector<double> &centers,
     const double padY = 0.05 * (m_specMaxY - m_specMinY + 1e-12);
 
     m_plot->xAxis->setRange(m_specMinX, m_specMaxX);
-    m_plot->yAxis->setRange(m_specMinY - padY, m_specMaxY + padY);
+    m_plot->yAxis->setRange(m_spectrumPercentages ? 0.0 : m_specMinY - padY, m_specMaxY + padY);
 
     m_graph->setData(m_specX, m_specY, true);
     m_plot->replot(QCustomPlot::rpQueuedReplot);
@@ -112,6 +117,7 @@ void SignalPlotWidget::setCombinedSpectrum(const std::vector<double> &centersInp
                                            const std::vector<double> &countsOutput)
 {
     m_mode = SignalPlotMode::SpectrumCombined;
+    m_spectrumPercentages = false;
 
     m_specInX = QVector<double>(centersInput.begin(), centersInput.end());
     m_specInY = QVector<double>(countsInput.begin(), countsInput.end());
@@ -143,7 +149,7 @@ void SignalPlotWidget::setCombinedSpectrum(const std::vector<double> &centersInp
     const double padY = 0.05 * (m_specMaxY - m_specMinY + 1e-12);
 
     m_plot->xAxis->setRange(m_specMinX, m_specMaxX);
-    m_plot->yAxis->setRange(m_specMinY - padY, m_specMaxY + padY);
+    m_plot->yAxis->setRange(m_spectrumPercentages ? 0.0 : m_specMinY - padY, m_specMaxY + padY);
 
     // Ensure second graph exists
     if (!m_graph2) {
@@ -203,6 +209,11 @@ void SignalPlotWidget::setSpectrumLogX(bool enabled)
 
 void SignalPlotWidget::clear()
 {
+    m_hasSpectrum = false;
+    m_hasCombinedSpectrum = false;
+    m_specX.clear();
+    m_specY.clear();
+    if (m_graph2) m_graph2->data()->clear();
     m_signal = std::make_shared<const std::vector<double>>();
     m_sampleRateHz = 0.0;
     m_fullMinTimeNs = 0.0;
@@ -242,7 +253,7 @@ void SignalPlotWidget::resetView()
 
         const double padY = 0.05 * (m_specMaxY - m_specMinY + 1e-12);
         m_plot->xAxis->setRange(m_specMinX, m_specMaxX);
-        m_plot->yAxis->setRange(m_specMinY - padY, m_specMaxY + padY);
+        m_plot->yAxis->setRange(m_spectrumPercentages ? 0.0 : m_specMinY - padY, m_specMaxY + padY);
         m_plot->replot(QCustomPlot::rpQueuedReplot);
         return;
     }

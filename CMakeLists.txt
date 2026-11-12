@@ -9,7 +9,7 @@ option(BUILD_CORE_TESTS_ONLY "Build model regression tests without Qt" OFF)
 include(CTest)
 if(BUILD_TESTING)
     add_executable(pulse_model_tests tests/pulse_model_tests.cpp
-        src/core/pulse_model.cpp src/core/signal_synthesis_service.cpp)
+        src/core/pulse_model.cpp src/core/signal_synthesis_service.cpp src/core/signal_diagnostics.cpp)
     target_include_directories(pulse_model_tests PRIVATE src/core)
     target_compile_features(pulse_model_tests PRIVATE cxx_std_17)
     add_test(NAME pulse_model_tests COMMAND pulse_model_tests)
@@ -47,6 +47,8 @@ set(PROJECT_SOURCES
     src/core/amplitude_spectrum.h
     src/core/pulse_model.cpp
     src/core/pulse_model.h
+    src/core/signal_diagnostics.cpp
+    src/core/signal_diagnostics.h
     src/core/signal_synthesis_service.cpp
     src/core/signal_synthesis_service.h
     src/core/amplifier_model.cpp

@@ -4,6 +4,11 @@
 #include <functional>
 #include <random>
 #include <vector>
+struct AdcClipping {
+    bool enabled = false;
+    double levelV = 1.0; // Symmetric limits: -levelV .. +levelV.
+};
+
 class SignalSynthesisService {
 public:
     static constexpr std::size_t maxSamples = 800'000'000;
@@ -14,5 +19,5 @@ public:
     std::vector<double> synthesize(const PulseModel &pulse,
         const std::vector<double> &eventTimesSec, double durationSec,
         double sampleRateHz, double noiseStdDev, std::mt19937 &rng,
-        const std::function<double(std::mt19937 &)> &amplitudeSampler = {}) const;
+        const std::function<double(std::mt19937 &)> &amplitudeSampler = {}, AdcClipping clipping = {}) const;
 };

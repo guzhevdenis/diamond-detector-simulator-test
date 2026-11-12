@@ -3,11 +3,19 @@
 
 #include "amplifiermodelwidget.h"
 #include <algorithm>
+#include <limits>
 #include <cmath>
 #include <stdexcept>
 #include <utility>
 #include <QScrollArea>
 #include "amplitude_spectrum.h"
+#include "signal_diagnostics.h"
+#include <QCheckBox>
+#include <QGroupBox>
+#include <QFile>
+#include <QFileInfo>
+#include <QTextStream>
+#include <QDir>
 #include "event_time_sampler.h"
 #include "signal_synthesis_service.h"
 #include "signal_plot_widget.h"
@@ -32,10 +40,6 @@
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QMessageBox>
-#include <QtCharts/QChart>
-#include <QtCharts/QChartView>
-#include <QtCharts/QLineSeries>
-#include <QtCharts/QValueAxis>
 #include <QPrinter>
 
 #include <QDateTime>
@@ -203,16 +207,50 @@ void MainWindow::buildUi()
     m_seedSpin->setRange(0, std::numeric_limits<int>::max());
     m_seedSpin->setValue(12345);
     noiseForm->addRow(tr("Random seed:"), m_seedSpin);
+    auto *outputForm = addSection(tr("Generated signal"), false);
+    m_adcClippingCheck = new QCheckBox(tr("Enable ADC Clipping"), controlsWidget);
+    outputForm->addRow(m_adcClippingCheck);
+    m_adcLevelSpin = addParameter(outputForm, tr("Clipping level +/- [V]:"), 0.000001, 1e9, 1.0, 6);
+    m_adcLevelSpin->setSingleStep(0.1);
+    m_adcLevelSpin->setEnabled(false);
+    m_adcLevelSpin->setToolTip(tr("Applied after pulse summation and noise, before display, diagnostics and export."));
+    connect(m_adcClippingCheck, &QCheckBox::toggled, m_adcLevelSpin, &QDoubleSpinBox::setEnabled);
     settingsLayout->addStretch();
 
     auto *charts = new QSplitter(Qt::Vertical, workspace);
     charts->setObjectName(QStringLiteral("generatorCharts"));
     charts->setChildrenCollapsible(false);
     charts->setHandleWidth(6);
-    m_signalPlotWidget = new SignalPlotWidget(charts);
+    auto *signalRow = new QSplitter(Qt::Horizontal, charts);
+    signalRow->setChildrenCollapsible(false);
+    m_signalPlotWidget = new SignalPlotWidget(signalRow);
     m_signalPlotWidget->setMinimumSize(240, 160);
     m_signalPlotWidget->setAxisLabels(tr("Time [ns]"), tr("Amplitude [V]"));
     m_signalPlotWidget->setTitle(tr("Generated Signal"));
+
+    auto *diagnosticsPanel = new QGroupBox(tr("Output diagnostics"), signalRow);
+    auto *diagnosticsLayout = new QVBoxLayout(diagnosticsPanel);
+    auto addDiagnostic = [&](const QString &caption) {
+        auto *label = new QLabel(caption, diagnosticsPanel);
+        label->setWordWrap(true);
+        diagnosticsLayout->addWidget(label);
+        auto *value = new QLabel(tr("Not generated"), diagnosticsPanel);
+        value->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        diagnosticsLayout->addWidget(value);
+        return value;
+    };
+    m_maximumLabel = addDiagnostic(tr("Maximum amplitude [V]"));
+    m_pulseCountLabel = addDiagnostic(tr("Detected pulses"));
+    m_detectionThresholdLabel = addDiagnostic(tr("Detection threshold [V]"));
+    auto *diagnosticsNote = new QLabel(tr("Measured from output samples after clipping. Overlap and noise can merge or hide pulses; this is a detected peak count."), diagnosticsPanel);
+    diagnosticsNote->setWordWrap(true);
+    diagnosticsLayout->addWidget(diagnosticsNote);
+    diagnosticsLayout->addStretch();
+    signalRow->addWidget(m_signalPlotWidget);
+    signalRow->addWidget(diagnosticsPanel);
+    signalRow->setStretchFactor(0, 1);
+    signalRow->setStretchFactor(1, 0);
+    signalRow->setSizes({650, 190});
 
     auto *detailCharts = new QSplitter(Qt::Horizontal, charts);
     detailCharts->setChildrenCollapsible(false);
@@ -221,18 +259,16 @@ void MainWindow::buildUi()
     m_pulsePlotWidget->setMinimumSize(160, 120);
     m_pulsePlotWidget->setAxisLabels(tr("Time [ns]"), tr("Amplitude [V]"));
     m_pulsePlotWidget->setTitle(tr("Pulse Model"));
-    m_spectrumChartView = new QChartView(new QChart(), detailCharts);
-    m_spectrumChartView->chart()->setTitle(tr("Amplitude Spectrum"));
-    m_spectrumChartView->setMinimumSize(160, 120);
-    m_spectrumChartView->setRubberBand(QChartView::RectangleRubberBand);
-    m_spectrumChartView->chart()->legend()->hide();
-    m_spectrumChartView->chart()->setMargins(QMargins(4, 4, 4, 4));
+    m_spectrumPlotWidget = new SignalPlotWidget(detailCharts);
+    m_spectrumPlotWidget->setTitle(tr("Amplitude Spectrum"));
+    m_spectrumPlotWidget->setMinimumSize(160, 120);
+    m_spectrumPlotWidget->setAxisLabels(tr("Amplitude [V]"), tr("Share [%]"));
     workspace->addWidget(controlsScroll);
     workspace->addWidget(charts);
-    charts->addWidget(m_signalPlotWidget);
+    charts->addWidget(signalRow);
     charts->addWidget(detailCharts);
     detailCharts->addWidget(m_pulsePlotWidget);
-    detailCharts->addWidget(m_spectrumChartView);
+    detailCharts->addWidget(m_spectrumPlotWidget);
     workspace->setStretchFactor(0, 0);
     workspace->setStretchFactor(1, 1);
     workspace->setSizes({320, 800});
@@ -255,7 +291,6 @@ void MainWindow::buildUi()
         settingsButton->setText(visible ? tr("Hide settings") : tr("Show settings"));
     });
     m_generateButton = new QPushButton(tr("Generate"), genPage);
-    m_resetZoomButton = new QPushButton(tr("Reset Signal Zoom"), genPage);
     auto *exportButton = new QToolButton(genPage);
     exportButton->setText(tr("Export"));
     exportButton->setPopupMode(QToolButton::InstantPopup);
@@ -265,7 +300,6 @@ void MainWindow::buildUi()
     exportButton->setMenu(exportMenu);
     actionsLayout->addWidget(settingsButton);
     actionsLayout->addWidget(m_generateButton);
-    actionsLayout->addWidget(m_resetZoomButton);
     actionsLayout->addStretch();
     actionsLayout->addWidget(exportButton);
     genLayout->addLayout(actionsLayout);
@@ -300,14 +334,20 @@ void MainWindow::buildUi()
     m_generateButton->setToolTip(tr("Generates pulses from the analytic model; no pulse template file is needed."));
     m_exportCsvAction->setEnabled(false);
     m_exportWlfAction->setEnabled(false);
+    for (auto *spin : {m_pulseAmplitudeSpin, m_normMeanSpin, m_normSigmaSpin,
+                       m_expLambdaSpin, m_logMuSpin, m_logSigmaSpin})
+        connect(spin, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
+                [this] { updateAmplitudeSpectrumChart(); });
+    connect(m_seedSpin, qOverload<int>(&QSpinBox::valueChanged), this,
+            [this] { updateAmplitudeSpectrumChart(); });
+    connect(m_spectrumPathEdit, &QLineEdit::editingFinished, this,
+            &MainWindow::updateAmplitudeSpectrumChart);
     updateAmplitudeControls();
     updatePulseChart();
     connect(m_loadSpectrumButton, &QPushButton::clicked,
             this, &MainWindow::onLoadAmplitudeSpectrum);
     connect(m_generateButton, &QPushButton::clicked,
             this, &MainWindow::onGenerate);
-    connect(m_resetZoomButton, &QPushButton::clicked,
-            this, &MainWindow::onResetSignalZoom);
     connect(m_exportCsvAction, &QAction::triggered,
             this, &MainWindow::onExportCsv);
     connect(m_exportWlfAction, &QAction::triggered,
@@ -346,11 +386,6 @@ void MainWindow::onLoadAmplitudeSpectrum()
     updateAmplitudeSpectrumChart();
 }
 
-void MainWindow::onResetSignalZoom()
-{
-    if (m_signalPlotWidget)
-        m_signalPlotWidget->resetView();
-}
 void MainWindow::onExportCsv()
 {
     if (m_lastSignal->empty() || m_lastSampleRateHz <= 0.0) {
@@ -584,12 +619,15 @@ void MainWindow::onGenerate()
         if (ampMode != 4)
             sampler = [this](std::mt19937 &rng) { return m_amplitudeSpectrum->sample(rng); };
         auto signal = m_synthService->synthesize(pulse, eventTimes, durationSec,
-                                                    sampleRateHz, noiseStdDev, m_rng, sampler);
+                                                    sampleRateHz, noiseStdDev, m_rng, sampler,
+                                                    {m_adcClippingCheck->isChecked(), m_adcLevelSpin->value()});
 
         if (signal.empty()) {
             QMessageBox::warning(this, tr("Error"), tr("Generated signal is empty."));
             return;
         }
+
+        const auto diagnostics = analyzeSignal(signal);
 
         // Store last signal for CSV and WLF export
         m_lastSignal = std::make_shared<const std::vector<double>>(std::move(signal));
@@ -597,6 +635,9 @@ void MainWindow::onGenerate()
         m_exportCsvAction->setEnabled(true);
         m_exportWlfAction->setEnabled(true);
 
+        m_maximumLabel->setText(QString::number(diagnostics.maximumV, 'g', 9));
+        m_pulseCountLabel->setText(QString::number(static_cast<qulonglong>(diagnostics.detectedPulses)));
+        m_detectionThresholdLabel->setText(QString::number(diagnostics.detectionThresholdV, 'g', 6));
         updateSignalChart(m_lastSignal, sampleRateHz);
         updateAmplitudeSpectrumChart();
     } catch (const std::exception &e) {
@@ -606,81 +647,40 @@ void MainWindow::onGenerate()
 
 void MainWindow::updateAmplitudeSpectrumChart()
 {
-    QChart *chart = m_spectrumChartView->chart();
-    chart->removeAllSeries();
-    for (auto *axis : chart->axes()) { chart->removeAxis(axis); delete axis; }
-
-    if (m_ampDistCombo->currentIndex() == 4) {
-        chart->setTitle(tr("Constant amplitude A = %1 V").arg(m_pulseAmplitudeSpin->value()));
-        return;
-    }
-    if (!m_amplitudeSpectrum->hasData()) {
-        chart->setTitle(tr("Amplitude Spectrum (built-in or default)"));
-        return;
-    }
-
-    auto *series = new QLineSeries(chart);
-
-    if (m_amplitudeSpectrum->mode() == AmplitudeSpectrum::Mode::Histogram) {
-        const auto &amps = m_amplitudeSpectrum->histAmplitudes();
-        const auto &weights = m_amplitudeSpectrum->histWeights();
-        for (std::size_t i = 0; i < amps.size(); ++i) {
-            series->append(amps[i], weights[i]);
-        }
-    } else if (m_amplitudeSpectrum->mode() == AmplitudeSpectrum::Mode::Samples) {
-        std::vector<double> centers;
-        std::vector<double> counts;
-        m_amplitudeSpectrum->histogramFromSamples(32, centers, counts);
-        for (std::size_t i = 0; i < centers.size(); ++i) {
-            series->append(centers[i], counts[i]);
-        }
-    } else {
-        // Built-in distributions: approximate with histogram from sampled values
-        const std::size_t sampleCount = 1000;
-        std::vector<double> samples;
-        samples.reserve(sampleCount);
-        std::mt19937 tmp(static_cast<std::mt19937::result_type>(m_seedSpin->value()));
-        for (std::size_t i = 0; i < sampleCount; ++i) {
-            samples.push_back(m_amplitudeSpectrum->sample(tmp));
-        }
-
-        if (!samples.empty()) {
-            const auto [minIt, maxIt] = std::minmax_element(samples.begin(), samples.end());
-            const double minA = *minIt;
-            const double maxA = *maxIt;
-            if (minA != maxA) {
-                const std::size_t binCount = 32;
-                const double width = (maxA - minA) / static_cast<double>(binCount);
-                std::vector<double> counts(binCount, 0.0);
-                for (double a : samples) {
-                    std::size_t idx = static_cast<std::size_t>((a - minA) / width);
-                    if (idx >= binCount)
-                        idx = binCount - 1;
-                    counts[idx] += 1.0;
-                }
-                for (std::size_t i = 0; i < binCount; ++i) {
-                    const double center = minA + (i + 0.5) * width;
-                    series->append(center, counts[i]);
-                }
+    // Build the preview from current controls, independently of generation RNG/state.
+    try {
+        PercentageHistogram histogram;
+        const int mode = m_ampDistCombo->currentIndex();
+        AmplitudeSpectrum spectrum;
+        if (mode == 4) {
+            histogram = {{m_pulseAmplitudeSpin->value()}, {100.0}};
+        } else if (mode == 0) {
+            if (!spectrum.loadFromFile(m_spectrumPathEdit->text().trimmed())) {
+                m_spectrumPlotWidget->clear();
+                m_spectrumPlotWidget->setTitle(tr("Load an amplitude spectrum"));
+                return;
             }
+            histogram = spectrum.mode() == AmplitudeSpectrum::Mode::Histogram
+                ? weightedPercentages(spectrum.histAmplitudes(), spectrum.histWeights())
+                : samplePercentages(spectrum.samples());
+        } else {
+            if (mode == 1) spectrum.setNormal(m_normMeanSpin->value(), m_normSigmaSpin->value());
+            else if (mode == 2) spectrum.setExponential(m_expLambdaSpin->value());
+            else spectrum.setLogNormal(m_logMuSpin->value(), m_logSigmaSpin->value());
+            std::mt19937 previewRng(static_cast<std::mt19937::result_type>(m_seedSpin->value()));
+            std::vector<double> samples;
+            samples.reserve(50000);
+            for (int i = 0; i < 50000; ++i) samples.push_back(spectrum.sample(previewRng));
+            histogram = samplePercentages(samples);
         }
+        m_spectrumPlotWidget->setTitle(tr("Amplitude Spectrum"));
+        m_spectrumPlotWidget->setSpectrum(histogram.centers, histogram.percentages, true);
+        m_spectrumPlotWidget->setToolTip(tr("Share per bin; total = 100%. Built-in distributions use 50000 preview samples. Constant A is a 100% line. Wheel: zoom; drag: pan; double-click: reset."));
+    } catch (const std::exception &e) {
+        m_spectrumPlotWidget->clear();
+        m_spectrumPlotWidget->setTitle(QString::fromUtf8(e.what()));
     }
-
-    chart->addSeries(series);
-
-    auto *axisX = new QValueAxis(chart);
-    axisX->setTitleText(tr("Amplitude [V]"));
-    chart->addAxis(axisX, Qt::AlignBottom);
-    series->attachAxis(axisX);
-
-    auto *axisY = new QValueAxis(chart);
-    axisY->setTitleText(tr("Weight / count"));
-    chart->addAxis(axisY, Qt::AlignLeft);
-    series->attachAxis(axisY);
-
-    chart->setTitle(tr("Amplitude Spectrum"));
 }
-
 
 void MainWindow::updateSignalChart(std::shared_ptr<const std::vector<double>> signal,
                                    double sampleRateHz)

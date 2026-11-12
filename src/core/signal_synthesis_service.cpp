@@ -16,7 +16,9 @@ std::size_t SignalSynthesisService::sampleCount(double duration, double fs) {
 
 std::vector<double> SignalSynthesisService::synthesize(const PulseModel &pulse,
     const std::vector<double> &events, double duration, double fs, double noiseStdDev,
-    std::mt19937 &rng, const std::function<double(std::mt19937 &)> &sampler) const {
+    std::mt19937 &rng, const std::function<double(std::mt19937 &)> &sampler, AdcClipping clipping) const {
+    if (clipping.enabled && (!std::isfinite(clipping.levelV) || clipping.levelV <= 0))
+        throw std::invalid_argument("ADC clipping level must be finite and positive.");
     const auto count = sampleCount(duration, fs);
     if (!std::isfinite(noiseStdDev) || noiseStdDev < 0)
         throw std::invalid_argument("Invalid noise level.");
@@ -36,5 +38,7 @@ std::vector<double> SignalSynthesisService::synthesize(const PulseModel &pulse,
         std::normal_distribution<double> noise(0, noiseStdDev);
         for (double &v : signal) v += noise(rng);
     }
+    if (clipping.enabled)
+        for (double &v : signal) v = std::clamp(v, -clipping.levelV, clipping.levelV);
     return signal;
 }

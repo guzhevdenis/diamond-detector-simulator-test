@@ -37,7 +37,7 @@ public:
     // Load amplitude spectrum data (e.g. histogram: centers & counts).
     // X values are used as-is; no time-axis logic is applied here.
     void setSpectrum(const std::vector<double> &centers,
-                     const std::vector<double> &counts);
+                     const std::vector<double> &counts, bool percentages = false);
 
     // Load two spectra at once for overlay (e.g. input vs output).
     void setCombinedSpectrum(const std::vector<double> &centersInput,
@@ -91,6 +91,7 @@ private:
     QVector<double> m_specX;
     QVector<double> m_specY;
     bool            m_hasSpectrum = false;
+    bool            m_spectrumPercentages = false;
     double          m_specMinX = 0.0;
     double          m_specMaxX = 0.0;
     double          m_specMinY = 0.0;

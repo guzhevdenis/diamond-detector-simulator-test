@@ -1,5 +1,7 @@
 #include "pulse_model.h"
 #include "signal_synthesis_service.h"
+#include "signal_diagnostics.h"
+#include <numeric>
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -70,6 +72,48 @@ int main() {
         auto sampled = service.synthesize(p, {t0}, 4e-6, 8e8, 0, rng,
             [](std::mt19937 &) { return 25.0; });
         near(sampled[100], p.value((100/8e8-t0)*1e9)*25/p.parameters().amplitude, 1e-12, "Sampler returns absolute A");
+        const auto raw = service.synthesize(p, {t0, t0+1e-6}, 4e-6, 8e8, 0, rng);
+        const auto clipped = service.synthesize(p, {t0, t0+1e-6}, 4e-6, 8e8, 0, rng, {}, {true, 0.05});
+        for (std::size_t k = 0; k < raw.size(); ++k)
+            near(clipped[k], std::clamp(raw[k], -0.05, 0.05), 0, "Symmetric ADC clipping");
+        require(*std::min_element(clipped.begin(), clipped.end()) == -0.05, "Negative ADC rail");
+        require(*std::max_element(clipped.begin(), clipped.end()) == 0.05, "Positive ADC rail");
+        auto diagnostic = analyzeSignal(clipped);
+        near(diagnostic.maximumV, 0.05, 0, "Diagnostics uses clipped output");
+        require(diagnostic.detectedPulses == 2, "Clipped plateaus counted once");
+        require(analyzeSignal(raw).detectedPulses == 2, "Separated model pulses");
+        const auto overlap = service.synthesize(p, {t0, t0}, 4e-6, 8e8, 0, rng);
+        require(analyzeSignal(overlap).detectedPulses == 1, "Count is measured, not event count");
+        require(analyzeSignal({}).detectedPulses == 0, "Empty diagnostics");
+        require(analyzeSignal(std::vector<double>(100, 0)).detectedPulses == 0, "Zero diagnostics");
+        std::vector<double> measured(100, 0);
+        measured.insert(measured.end(), {0.2, 0.4, 0.6, 0.6, 0.3, 0, -0.1, 0, 0.2, 0.7, 0.2, 0});
+        measured.resize(250, 0);
+        require(analyzeSignal(measured).detectedPulses == 2, "Waveform-only peaks and plateau");
+        std::mt19937 noiseRawRng(7), noiseClippedRng(7);
+        const auto noisy = service.synthesize(p, {}, 1e-6, 8e8, 2, noiseRawRng);
+        const auto noisyClipped = service.synthesize(p, {}, 1e-6, 8e8, 2, noiseClippedRng, {}, {true, 1});
+        for (std::size_t k = 0; k < noisy.size(); ++k)
+            near(noisyClipped[k], std::clamp(noisy[k], -1.0, 1.0), 0, "Clip after noise");
+        rejects([&] { service.synthesize(p, {}, 1e-6, 8e8, 0, rng, {}, {true, 0}); });
+        const auto constantHistogram = samplePercentages({0.4, 0.4, 0.4});
+        require(constantHistogram.centers.size() == 1, "Constant histogram is visible");
+        near(constantHistogram.percentages[0], 100, 0, "Constant histogram share");
+        const auto weighted = weightedPercentages({2, 1, 2}, {1, 2, 3});
+        require(weighted.centers == std::vector<double>({1, 2}), "Sort and merge file spectrum");
+        near(weighted.percentages[1], 100.0*4/6, 1e-12, "File spectrum normalization");
+        std::mt19937 histogramRng(11);
+        std::normal_distribution<double> normal(1, 0.1);
+        std::exponential_distribution<double> exponential(1);
+        std::lognormal_distribution<double> logNormal(0, .25);
+        for (int mode = 0; mode < 3; ++mode) {
+            std::vector<double> population;
+            for (int i = 0; i < 50000; ++i)
+                population.push_back(mode == 0 ? normal(histogramRng) : mode == 1 ? exponential(histogramRng) : logNormal(histogramRng));
+            const auto histogram = samplePercentages(population);
+            require(histogram.centers.size() == 64, "Built-in histogram bins");
+            near(std::accumulate(histogram.percentages.begin(), histogram.percentages.end(), 0.0), 100, 1e-10, "Percentages total 100");
+        }
         auto baseline = service.synthesize(p, {}, 1e-6, 8e8, 0, rng);
         require(std::all_of(baseline.begin(), baseline.end(), [](double v) { return v == 0; }), "Zero baseline");
         std::mt19937 r1(42), r2(42);

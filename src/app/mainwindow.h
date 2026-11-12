@@ -5,10 +5,6 @@
 #include <random>
 #include <vector>
 #include <memory>
-#include <QtCharts>
-#include <QtCharts/QChartView>
-#include <QtCharts/QChart>
-#include <QtCharts/QLineSeries>
 
 #include "values_provider.h"
 #include "pulse_model.h"
@@ -21,7 +17,8 @@ class QPushButton;
 class QComboBox;
 class QSpinBox;
 class QDoubleSpinBox;
-class QChartView;
+class QLabel;
+class QFile;
 class QCheckBox;
 class AmplifierModelWidget;
 
@@ -50,7 +47,6 @@ public:
 private slots:
     void onLoadAmplitudeSpectrum();
     void onGenerate();
-    void onResetSignalZoom();
     void onExportCsv();
     void onExportWlf();
 
@@ -89,7 +85,6 @@ private:
     QSpinBox       *m_seedSpin        = nullptr;
 
     QPushButton *m_generateButton     = nullptr;
-    QPushButton *m_resetZoomButton    = nullptr;
     QAction     *m_exportCsvAction    = nullptr;
     QAction     *m_exportWlfAction    = nullptr;
 
@@ -104,7 +99,12 @@ private:
     // Charts
     SignalPlotWidget *m_signalPlotWidget = nullptr;
     SignalPlotWidget *m_pulsePlotWidget = nullptr;
-    QChartView *m_spectrumChartView  = nullptr;
+    SignalPlotWidget *m_spectrumPlotWidget = nullptr;
+    QCheckBox *m_adcClippingCheck = nullptr;
+    QDoubleSpinBox *m_adcLevelSpin = nullptr;
+    QLabel *m_maximumLabel = nullptr;
+    QLabel *m_pulseCountLabel = nullptr;
+    QLabel *m_detectionThresholdLabel = nullptr;
 
     // Last generated signal (for CSV and WLF export)
     std::shared_ptr<const std::vector<double>> m_lastSignal = std::make_shared<const std::vector<double>>();
