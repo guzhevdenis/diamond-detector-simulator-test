@@ -2,6 +2,7 @@
 #include "./ui_mainwindow.h"
 
 #include "amplifiermodelwidget.h"
+#include "fpga_processing_dialog.h"
 #include <algorithm>
 #include <limits>
 #include <cmath>
@@ -300,6 +301,10 @@ void MainWindow::buildUi()
     exportButton->setMenu(exportMenu);
     actionsLayout->addWidget(settingsButton);
     actionsLayout->addWidget(m_generateButton);
+    m_fpgaSimulationButton = new QPushButton(tr("FPGA Data Processing Simulation"), genPage);
+    m_fpgaSimulationButton->setEnabled(false);
+    actionsLayout->addWidget(m_fpgaSimulationButton);
+    connect(m_fpgaSimulationButton, &QPushButton::clicked, this, &MainWindow::onFpgaSimulation);
     actionsLayout->addStretch();
     actionsLayout->addWidget(exportButton);
     genLayout->addLayout(actionsLayout);
@@ -632,6 +637,7 @@ void MainWindow::onGenerate()
         // Store last signal for CSV and WLF export
         m_lastSignal = std::make_shared<const std::vector<double>>(std::move(signal));
         m_lastSampleRateHz = sampleRateHz;
+        m_fpgaSimulationButton->setEnabled(true);
         m_exportCsvAction->setEnabled(true);
         m_exportWlfAction->setEnabled(true);
 
@@ -723,4 +729,20 @@ void MainWindow::updatePulseChart()
         m_pulsePlotWidget->clear();
         m_pulsePlotWidget->setTitle(QString::fromUtf8(e.what()));
     }
+}
+
+void MainWindow::onFpgaSimulation()
+{
+    if (m_lastSignal->empty()) {
+        QMessageBox::warning(this, tr("FPGA Data Processing Simulation"), tr("Generate a signal first."));
+        return;
+    }
+    // Check the frequency of the stored record, not an edited input control.
+    if (m_lastSampleRateHz != Fpga::sampleRate) {
+        QMessageBox::warning(this, tr("FPGA Data Processing Simulation"),
+            tr("Simulation is impossible: the generated signal must be sampled at 800 MHz. This record uses %1 MHz. Change the sample rate and generate a new signal.").arg(m_lastSampleRateHz / 1e6));
+        return;
+    }
+    auto *dialog = new FpgaProcessingDialog(m_lastSignal, m_lastSampleRateHz, this);
+    dialog->show();
 }

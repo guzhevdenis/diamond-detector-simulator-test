@@ -13,6 +13,10 @@ if(BUILD_TESTING)
     target_include_directories(pulse_model_tests PRIVATE src/core)
     target_compile_features(pulse_model_tests PRIVATE cxx_std_17)
     add_test(NAME pulse_model_tests COMMAND pulse_model_tests)
+    add_executable(fpga_processing_tests tests/fpga_processing_tests.cpp src/core/fpga_processing.cpp)
+    target_include_directories(fpga_processing_tests PRIVATE src/core)
+    target_compile_features(fpga_processing_tests PRIVATE cxx_std_17)
+    add_test(NAME fpga_processing_tests COMMAND fpga_processing_tests)
 endif()
 if(BUILD_CORE_TESTS_ONLY)
     return()
@@ -58,6 +62,10 @@ set(PROJECT_SOURCES
     src/core/amplitude_spectrum_analyzer.cpp
     src/core/amplitude_spectrum_analyzer.h
     src/core/values_provider.h
+    src/core/fpga_processing.cpp
+    src/core/fpga_processing.h
+    src/ui/fpga_processing_dialog.cpp
+    src/ui/fpga_processing_dialog.h
 
     src/ui/signal_plot_widget.cpp
     src/ui/signal_plot_widget.h

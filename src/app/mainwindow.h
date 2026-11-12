@@ -47,6 +47,7 @@ public:
 private slots:
     void onLoadAmplitudeSpectrum();
     void onGenerate();
+    void onFpgaSimulation();
     void onExportCsv();
     void onExportWlf();
 
@@ -85,6 +86,7 @@ private:
     QSpinBox       *m_seedSpin        = nullptr;
 
     QPushButton *m_generateButton     = nullptr;
+    QPushButton *m_fpgaSimulationButton = nullptr;
     QAction     *m_exportCsvAction    = nullptr;
     QAction     *m_exportWlfAction    = nullptr;
 
