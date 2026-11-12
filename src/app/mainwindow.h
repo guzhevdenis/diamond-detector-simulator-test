@@ -104,9 +104,6 @@ private:
     SignalPlotWidget *m_spectrumPlotWidget = nullptr;
     QCheckBox *m_adcClippingCheck = nullptr;
     QDoubleSpinBox *m_adcLevelSpin = nullptr;
-    QLabel *m_maximumLabel = nullptr;
-    QLabel *m_pulseCountLabel = nullptr;
-    QLabel *m_detectionThresholdLabel = nullptr;
 
     // Last generated signal (for CSV and WLF export)
     std::shared_ptr<const std::vector<double>> m_lastSignal = std::make_shared<const std::vector<double>>();

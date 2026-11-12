@@ -12,7 +12,6 @@
 #include "amplitude_spectrum.h"
 #include "signal_diagnostics.h"
 #include <QCheckBox>
-#include <QGroupBox>
 #include <QFile>
 #include <QFileInfo>
 #include <QTextStream>
@@ -149,9 +148,33 @@ void MainWindow::buildUi()
     m_riseTimeSpin = addParameter(pulseForm, tr("tau_r [ns]:"), 0.001, 1e6, 6, 3);
     m_fallTimeSpin = addParameter(pulseForm, tr("tau_f [ns]:"), 0.001, 1e6, 20, 3);
     m_betaSpin = addParameter(pulseForm, tr("beta:"), 0, 1000, 0.08, 6);
-    auto *modelNote = new QLabel(tr("Fixed: tau_u = 100 ns; baseline = 0 V. A is the positive peak height in volts."), controlsWidget);
-    modelNote->setWordWrap(true);
-    pulseForm->addRow(modelNote);
+    auto *modelFormula = new QLabel(controlsWidget);
+    modelFormula->setTextFormat(Qt::RichText);
+    modelFormula->setWordWrap(true);
+    modelFormula->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    modelFormula->setMargin(6);
+    modelFormula->setFrameShape(QFrame::StyledPanel);
+    modelFormula->setText(tr(
+        "<p><b>Pulse model</b><br/>"
+        "x = t &minus; t<sub>0</sub><br/>"
+        "y(t) = y<sub>0</sub> + <b>A</b> &middot; F(x) / F<sub>max</sub></p>"
+        "<p>For x &ge; 0:<br/>"
+        "F(x) = e<sup>&minus;x/<b>&tau;<sub>f</sub></b></sup>"
+        " &minus; e<sup>&minus;x/<b>&tau;<sub>r</sub></b></sup><br/>"
+        "&nbsp;&nbsp;&minus; <b>&beta;</b> &middot; "
+        "(e<sup>&minus;x/&tau;<sub>u</sub></sup>"
+        " &minus; e<sup>&minus;x/<b>&tau;<sub>r</sub></b></sup>)<br/>"
+        "For x &lt; 0: F(x) = 0.<br/>"
+        "F<sub>max</sub> = max<sub>x &ge; 0</sub> F(x).</p>"
+        "<p><b>Adjustable parameters</b><br/>"
+        "<b>A</b>: positive peak height [V]<br/>"
+        "<b>&tau;<sub>r</sub></b> (tau_r): rise constant [ns]<br/>"
+        "<b>&tau;<sub>f</sub></b> (tau_f): fall constant [ns]<br/>"
+        "<b>&beta;</b> (beta): negative-tail coefficient</p>"
+        "<p>Fixed: &tau;<sub>u</sub> = 100 ns; y<sub>0</sub> = 0 V.<br/>"
+        "t<sub>0</sub>: event start time.<br/>"
+        "Normalization is independent of the output sample rate.</p>"));
+    pulseForm->addRow(modelFormula);
 
     auto *eventsForm = addSection(tr("Event timing"), false);
     m_timeDistCombo = new QComboBox(controlsWidget);
@@ -214,7 +237,7 @@ void MainWindow::buildUi()
     m_adcLevelSpin = addParameter(outputForm, tr("Clipping level +/- [V]:"), 0.000001, 1e9, 1.0, 6);
     m_adcLevelSpin->setSingleStep(0.1);
     m_adcLevelSpin->setEnabled(false);
-    m_adcLevelSpin->setToolTip(tr("Applied after pulse summation and noise, before display, diagnostics and export."));
+    m_adcLevelSpin->setToolTip(tr("Applied after pulse summation and noise, before display, FPGA simulation and export."));
     connect(m_adcClippingCheck, &QCheckBox::toggled, m_adcLevelSpin, &QDoubleSpinBox::setEnabled);
     settingsLayout->addStretch();
 
@@ -222,36 +245,10 @@ void MainWindow::buildUi()
     charts->setObjectName(QStringLiteral("generatorCharts"));
     charts->setChildrenCollapsible(false);
     charts->setHandleWidth(6);
-    auto *signalRow = new QSplitter(Qt::Horizontal, charts);
-    signalRow->setChildrenCollapsible(false);
-    m_signalPlotWidget = new SignalPlotWidget(signalRow);
+    m_signalPlotWidget = new SignalPlotWidget(charts);
     m_signalPlotWidget->setMinimumSize(240, 160);
     m_signalPlotWidget->setAxisLabels(tr("Time [ns]"), tr("Amplitude [V]"));
     m_signalPlotWidget->setTitle(tr("Generated Signal"));
-
-    auto *diagnosticsPanel = new QGroupBox(tr("Output diagnostics"), signalRow);
-    auto *diagnosticsLayout = new QVBoxLayout(diagnosticsPanel);
-    auto addDiagnostic = [&](const QString &caption) {
-        auto *label = new QLabel(caption, diagnosticsPanel);
-        label->setWordWrap(true);
-        diagnosticsLayout->addWidget(label);
-        auto *value = new QLabel(tr("Not generated"), diagnosticsPanel);
-        value->setTextInteractionFlags(Qt::TextSelectableByMouse);
-        diagnosticsLayout->addWidget(value);
-        return value;
-    };
-    m_maximumLabel = addDiagnostic(tr("Maximum amplitude [V]"));
-    m_pulseCountLabel = addDiagnostic(tr("Detected pulses"));
-    m_detectionThresholdLabel = addDiagnostic(tr("Detection threshold [V]"));
-    auto *diagnosticsNote = new QLabel(tr("Measured from output samples after clipping. Overlap and noise can merge or hide pulses; this is a detected peak count."), diagnosticsPanel);
-    diagnosticsNote->setWordWrap(true);
-    diagnosticsLayout->addWidget(diagnosticsNote);
-    diagnosticsLayout->addStretch();
-    signalRow->addWidget(m_signalPlotWidget);
-    signalRow->addWidget(diagnosticsPanel);
-    signalRow->setStretchFactor(0, 1);
-    signalRow->setStretchFactor(1, 0);
-    signalRow->setSizes({650, 190});
 
     auto *detailCharts = new QSplitter(Qt::Horizontal, charts);
     detailCharts->setChildrenCollapsible(false);
@@ -266,7 +263,7 @@ void MainWindow::buildUi()
     m_spectrumPlotWidget->setAxisLabels(tr("Amplitude [V]"), tr("Share [%]"));
     workspace->addWidget(controlsScroll);
     workspace->addWidget(charts);
-    charts->addWidget(signalRow);
+    charts->addWidget(m_signalPlotWidget);
     charts->addWidget(detailCharts);
     detailCharts->addWidget(m_pulsePlotWidget);
     detailCharts->addWidget(m_spectrumPlotWidget);
@@ -632,8 +629,6 @@ void MainWindow::onGenerate()
             return;
         }
 
-        const auto diagnostics = analyzeSignal(signal);
-
         // Store last signal for CSV and WLF export
         m_lastSignal = std::make_shared<const std::vector<double>>(std::move(signal));
         m_lastSampleRateHz = sampleRateHz;
@@ -641,9 +636,6 @@ void MainWindow::onGenerate()
         m_exportCsvAction->setEnabled(true);
         m_exportWlfAction->setEnabled(true);
 
-        m_maximumLabel->setText(QString::number(diagnostics.maximumV, 'g', 9));
-        m_pulseCountLabel->setText(QString::number(static_cast<qulonglong>(diagnostics.detectedPulses)));
-        m_detectionThresholdLabel->setText(QString::number(diagnostics.detectionThresholdV, 'g', 6));
         updateSignalChart(m_lastSignal, sampleRateHz);
         updateAmplitudeSpectrumChart();
     } catch (const std::exception &e) {

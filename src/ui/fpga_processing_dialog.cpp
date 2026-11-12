@@ -6,6 +6,8 @@
 #include <QHBoxLayout>
 #include <QFormLayout>
 #include <QTabWidget>
+#include <QTabBar>
+#include <QFont>
 #include <QSpinBox>
 #include <QDoubleSpinBox>
 #include <QCheckBox>
@@ -92,6 +94,19 @@ FpgaProcessingDialog::FpgaProcessingDialog(std::shared_ptr<const std::vector<dou
     m_gate = integer(left,tr("Gate [us]:"),16,1000000,1000);
     m_hold = new QCheckBox(tr("BaselineHold (initial baseline = 0)"),settings); left->addRow(m_hold);
     m_maxLength = new QDoubleSpinBox(settings); m_maxLength->setDecimals(0); m_maxLength->setRange(1,4294967295.0); m_maxLength->setValue(4294967295.0); left->addRow(tr("MaxLength [ticks], max = disabled:"),m_maxLength);
+    auto *maxLengthNs = new QLabel(settings);
+    maxLengthNs->setWordWrap(true);
+    maxLengthNs->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    left->addRow(tr("MaxLength [ns]:"), maxLengthNs);
+    auto updateMaxLengthNs = [this, maxLengthNs] {
+        const double ticks = m_maxLength->value();
+        QString value = QString::number(ticks * (Fpga::tickSeconds * 1e9), 'f', 0);
+        if (ticks == double(UINT32_MAX)) value += tr(" (disabled)");
+        maxLengthNs->setText(value);
+    };
+    connect(m_maxLength, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
+            [updateMaxLengthNs] { updateMaxLengthNs(); });
+    updateMaxLengthNs();
     m_peakMin = integer(right,tr("FPGA PeakMin [codes]:"),INT32_MIN,INT32_MAX,0);
     m_integralMin = integer(right,tr("FPGA IntegralMin [sum codes]:"),INT32_MIN,INT32_MAX,0);
     m_peakShift = integer(right,tr("FPGA PeakShift (512 bins):"),0,30,6);
@@ -127,6 +142,14 @@ FpgaProcessingDialog::FpgaProcessingDialog(std::shared_ptr<const std::vector<dou
     auto *ratePage = new QWidget(this); auto *rateLayout = new QVBoxLayout(ratePage);
     auto *rateRow = new QSplitter(Qt::Horizontal,ratePage); m_rates = plot(rateRow,tr("Time [ms]"),tr("Rate [1/s]")); m_fractions = plot(rateRow,tr("Time [ms]"),tr("Fraction [%]")); rateRow->addWidget(m_rates); rateRow->addWidget(m_fractions); rateLayout->addWidget(rateRow,1);
     m_gates = new QTableView(ratePage); rateLayout->addWidget(m_gates,1); tabs->addTab(ratePage,tr("Gates and rates"));
+    // Match table headings to the actual tab-bar font, including DPI scaling.
+    const QFont headerFont = tabs->tabBar()->font();
+    for (auto *table : {m_pulses, m_gates}) {
+        table->horizontalHeader()->setFont(headerFont);
+        table->verticalHeader()->setFont(headerFont);
+        table->horizontalHeader()->setHighlightSections(false);
+        table->verticalHeader()->setHighlightSections(false);
+    }
     connect(overview,&QPushButton::clicked,this,[this] { showWaveform(); });
     connect(m_spectrumMode,qOverload<int>(&QComboBox::currentIndexChanged),this,[this] { showSpectra(); });
     connect(m_percent,&QCheckBox::toggled,this,[this] { showSpectra(); });
